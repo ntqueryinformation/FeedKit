@@ -406,7 +406,7 @@ int APIENTRY wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nCmdShow) {
     {
         std::lock_guard<std::mutex> lk(g_state.mtx);
         g_state.log.push_back({to_utf8(L"00:00:00"),
-                               to_utf8(L"FeedKit v1.3 - pick a game .exe (or drop it here), then Install. "
+                               to_utf8(L"FeedKit v1.3.1 - pick a game .exe (or drop it here), then Install. "
                                        L"Everything is fetched fresh from upstream on each install."),
                                IM_COL32(139, 148, 158, 255)});
     }

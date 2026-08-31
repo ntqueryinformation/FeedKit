@@ -304,7 +304,7 @@ void draw_ui(AppState& s, AppActions& out) {
     ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 6 * sc);
     ImGui::PushStyleColor(ImGuiCol_Text, C_FAINT);
     ImGui::PushFont(F_REG(), 12.5f * sc);
-    ImGui::TextUnformatted("v1.3.0");
+    ImGui::TextUnformatted("v1.3.1");
     ImGui::PopFont();
     ImGui::PopStyleColor();
 
