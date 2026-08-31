@@ -67,6 +67,15 @@ struct ReshadeHeaders {
     bool ok = false;
 };
 
+// dgVoodoo2 (D3D9 -> D3D11 translation) for D3D9 games, staged flat.
+struct DgvoodooBundle {
+    std::wstring version;
+    std::wstring d3d9_dll;
+    std::wstring conf;
+    std::wstring cpl;
+    bool ok = false;
+};
+
 // Temporary working directory for this session's downloads.
 std::wstring fetch_temp_dir();
 
@@ -93,6 +102,10 @@ LumeniteBundle fetch_lumenite(const LogFn& log, const ProgressFn& progress);
 
 // Standard ReShade shader headers from crosire/reshade-shaders (default branch).
 ReshadeHeaders fetch_reshade_headers(const LogFn& log, const ProgressFn& progress);
+
+// dgVoodoo2 from dege.freeweb.hu (latest version scraped from the downloads
+// page), D3D9.dll (x86) + conf + control panel extracted and staged flat.
+DgvoodooBundle fetch_dgvoodoo(const LogFn& log, const ProgressFn& progress);
 
 // Extract files from a zip whose name matches any of `patterns` (simple wildcard
 // with *). Returns absolute paths of extracted files.

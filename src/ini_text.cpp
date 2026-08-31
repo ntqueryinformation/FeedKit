@@ -56,9 +56,15 @@ bool find_key_line(const std::vector<std::wstring>& lines, const std::wstring& s
             in_section = _wcsicmp(t.c_str(), header.c_str()) == 0;
             continue;
         }
-        if (in_section && starts_with(lines[i], key + L"=")) {
-            out_idx = i;
-            return true;
+        if (!in_section)
+            continue;
+        // Match "key=value" and "key = value" (dgVoodoo.conf pads with spaces).
+        if (starts_with(t, key)) {
+            size_t eq = t.find(L'=', key.size());
+            if (eq != std::wstring::npos && trim(t.substr(key.size(), eq - key.size())).empty()) {
+                out_idx = i;
+                return true;
+            }
         }
     }
     return false;

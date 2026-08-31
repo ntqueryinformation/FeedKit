@@ -304,7 +304,7 @@ void draw_ui(AppState& s, AppActions& out) {
     ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 6 * sc);
     ImGui::PushStyleColor(ImGuiCol_Text, C_FAINT);
     ImGui::PushFont(F_REG(), 12.5f * sc);
-    ImGui::TextUnformatted("v1.1.3");
+    ImGui::TextUnformatted("v1.2.0");
     ImGui::PopFont();
     ImGui::PopStyleColor();
 
@@ -383,6 +383,11 @@ void draw_ui(AppState& s, AppActions& out) {
     ImGui::SameLine();
     ImGui::PushStyleColor(ImGuiCol_Text, C_DIM);
     ImGui::TextUnformatted("(fallback for Vulkan games)");
+    ImGui::PopStyleColor();
+    ImGui::Checkbox("D3D9 game - install the dgVoodoo2 translation", &s.d3d9);
+    ImGui::SameLine();
+    ImGui::PushStyleColor(ImGuiCol_Text, C_DIM);
+    ImGui::TextUnformatted("(translates D3D9 to D3D11 so the feed works)");
     ImGui::PopStyleColor();
 
     ImGui::Dummy({0, 4 * sc});

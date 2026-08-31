@@ -29,6 +29,7 @@ struct AppState {
 
     bool lumenite = true;
     bool vulkan = false;
+    bool d3d9 = false;
 
     bool busy = false;
     std::vector<LogLine> log;

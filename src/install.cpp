@@ -250,6 +250,9 @@ InstallResult run_install(const InstallOptions& opts, const LogFn& log, const Pr
         RenoDxBundle renodx = fetch_renodx_dlss5(log, progress);
         NgxBundle ngx = fetch_ngx_dlls(log, progress);
         ReshadeHeaders reshade_headers = fetch_reshade_headers(log, progress);
+        DgvoodooBundle dgvoodoo;
+        if (opts.d3d9_translate)
+            dgvoodoo = fetch_dgvoodoo(log, progress);
         LumeniteBundle lumenite;
         if (opts.install_lumenite)
             lumenite = fetch_lumenite(log, progress);
@@ -260,26 +263,80 @@ InstallResult run_install(const InstallOptions& opts, const LogFn& log, const Pr
         log(L"");
         log(L"== Installing ==");
         const std::wstring game_ini = path_combine(game_dir, L"ReShade.ini");
+        std::wstring reshade_dir = game_dir;
         if (need_reshade) {
             if (!reshade_headless_install(reshade.setup_exe_path, game_exe, log))
                 fail(L"ReShade setup did not complete successfully. No files were changed except the download cache.");
-            if (!file_exists(dxgi))
-                fail(L"ReShade setup reported success but dxgi.dll is missing.");
+            // Setup's per-game database can redirect the install (Source engine
+            // games -> bin\ etc). The root ReShade.ini is then just an
+            // [INSTALL] BasePath marker pointing at the real location.
+            if (!file_exists(dxgi)) {
+                std::wstring base;
+                if (ini_get_exact(game_ini, L"INSTALL", L"BasePath", base) && !trim(base).empty()) {
+                    reshade_dir = trim(base);
+                    log(L"ReShade redirected this game's install to: " + reshade_dir);
+                }
+            }
+            if (!file_exists(path_combine(reshade_dir, L"dxgi.dll")))
+                fail(L"ReShade setup reported success but dxgi.dll is missing (looked in " + reshade_dir + L").");
             rec.reshade_by_us = true;
-            sink.record_new(dxgi);
-            sink.record_new(game_ini);
+            rec.reshade_dir = reshade_dir;
+            sink.record_new(path_combine(reshade_dir, L"dxgi.dll"));
+            sink.record_new(game_ini); // root ini (marker when redirected, the real one otherwise)
+            if (reshade_dir != game_dir)
+                sink.record_new(path_combine(reshade_dir, L"ReShade.ini"));
+        } else {
+            // ReShade already present - find where it actually lives.
+            if (!file_exists(dxgi)) {
+                std::wstring base;
+                if (ini_get_exact(game_ini, L"INSTALL", L"BasePath", base) && !trim(base).empty())
+                    reshade_dir = trim(base);
+            }
+            rec.reshade_dir = reshade_dir;
         }
+        const std::wstring reshade_ini = path_combine(reshade_dir, L"ReShade.ini");
         // Repair the search-path globs ReShade Setup 6.8 writes malformed
         // (error 123, effects never found). No-op when already sane.
-        normalize_search_paths(game_ini, rec, log);
+        normalize_search_paths(reshade_ini, rec, log);
 
-        // 3) Feeder add-on + shader.
+        // 3) D3D9: dgVoodoo2 translation (D3D9 -> D3D11) so the DXGI flow applies.
+        if (opts.d3d9_translate) {
+            rec.d3d9_translate = true;
+            log(L"Installing dgVoodoo2 " + dgvoodoo.version + L" (D3D9 -> D3D11 translation)...");
+            sink.place(dgvoodoo.d3d9_dll, path_combine(reshade_dir, L"d3d9.dll"));
+            sink.place(dgvoodoo.cpl, path_combine(reshade_dir, L"dgVoodooCpl.exe"));
+            sink.place(dgvoodoo.conf, path_combine(reshade_dir, L"dgVoodoo.conf"));
+
+            struct KV { const wchar_t* section; const wchar_t* key; const wchar_t* value; };
+            const KV settings[] = {
+                {L"DirectX", L"DisableAndPassThru", L"false"},
+                {L"DirectX", L"VideoCard", L"internal3D"},
+                {L"DirectX", L"VRAM", L"1024"},
+                {L"DirectX", L"dgVoodooWatermark", L"true"},
+                {L"General", L"OutputAPI", L"d3d11_fl11_0"},
+            };
+            for (const auto& s : settings) {
+                std::wstring orig;
+                ini_get_exact(dgvoodoo.conf, s.section, s.key, orig);
+                if (lower(trim(orig)) == lower(s.value))
+                    continue;
+                if (!ini_set_exact(dgvoodoo.conf, s.section, s.key, s.value))
+                    fail(std::wstring(L"Cannot update ") + s.key + L" in " + dgvoodoo.conf);
+                rec.ini_touched.push_back({dgvoodoo.conf, s.section, s.key, trim(orig)});
+            }
+            log(L"dgVoodoo2 configured for DLSS5-Feeder: OutputAPI=d3d11_fl11_0, "
+                L"VideoCard=internal3D, VRAM=1024, DisableAndPassThru=false.");
+            log(L"On first launch the dgVoodoo watermark should appear in-game - "
+                L"that confirms the translation is active.");
+        }
+
+        // 4) Feeder add-on + shader.
         if (rec.is_32bit)
-            sink.place(feeder.addon32.local_path, path_combine(game_dir, L"dlss5-feed.addon32"));
+            sink.place(feeder.addon32.local_path, path_combine(reshade_dir, L"dlss5-feed.addon32"));
         else
-            sink.place(feeder.addon64.local_path, path_combine(game_dir, L"dlss5-feed.addon64"));
+            sink.place(feeder.addon64.local_path, path_combine(reshade_dir, L"dlss5-feed.addon64"));
 
-        std::wstring shaders_dir = path_combine(game_dir, L"reshade-shaders\\Shaders");
+        std::wstring shaders_dir = path_combine(reshade_dir, L"reshade-shaders\\Shaders");
         sink.place(feeder.fx_shader.local_path, path_combine(shaders_dir, L"DLSS5_Feed.fx"));
 
         // Standard headers: headless ReShade setup skips the effects package
@@ -288,10 +345,10 @@ InstallResult run_install(const InstallOptions& opts, const LogFn& log, const Pr
         sink.place(reshade_headers.ui_fxh_path, path_combine(shaders_dir, L"ReShadeUI.fxh"));
         sink.place(reshade_headers.drawtext_path, path_combine(shaders_dir, L"DrawText.fxh"));
 
-        // 4) RenoDX DLSS5 add-on + NGX DLLs.
+        // 5) RenoDX DLSS5 add-on + NGX DLLs.
         if (rec.is_32bit) {
             // 32-bit game: the 64-bit stack runs inside the host64 helper.
-            std::wstring host_dir = path_combine(game_dir, L"host64");
+            std::wstring host_dir = path_combine(reshade_dir, L"host64");
             sink.place(feeder.host64_exe.local_path, path_combine(host_dir, L"dlss5-feed-host64.exe"));
 
             std::wstring host_dxgi = path_combine(host_dir, L"dxgi.dll");
@@ -306,17 +363,17 @@ InstallResult run_install(const InstallOptions& opts, const LogFn& log, const Pr
             sink.place(ngx.nr_dll_path, path_combine(host_dir, L"nvngx_dlssnr.dll"));
             sink.place(ngx.sr_dll_path, path_combine(host_dir, L"nvngx_dlss.dll"));
         } else {
-            sink.place(renodx.addon64_path, path_combine(game_dir, L"renodx-dlss5.addon64"));
-            sink.place(ngx.nr_dll_path, path_combine(game_dir, L"nvngx_dlssnr.dll"));
-            sink.place(ngx.sr_dll_path, path_combine(game_dir, L"nvngx_dlss.dll"));
+            sink.place(renodx.addon64_path, path_combine(reshade_dir, L"renodx-dlss5.addon64"));
+            sink.place(ngx.nr_dll_path, path_combine(reshade_dir, L"nvngx_dlssnr.dll"));
+            sink.place(ngx.sr_dll_path, path_combine(reshade_dir, L"nvngx_dlss.dll"));
         }
 
-        // 5) LumeniteFX motion-vector provider (recommended, default on).
+        // 6) LumeniteFX motion-vector provider (recommended, default on).
         if (opts.install_lumenite) {
             log(L"Installing LumeniteFX shaders...");
             for (const auto& src : lumenite.files) {
                 std::wstring rel = src.substr(lumenite.staging_dir.size() + 1);
-                sink.place(src, path_combine(game_dir, rel));
+                sink.place(src, path_combine(reshade_dir, rel));
             }
         } else {
             log(L"LumeniteFX skipped - install a motion-vector provider yourself and set "
@@ -324,25 +381,25 @@ InstallResult run_install(const InstallOptions& opts, const LogFn& log, const Pr
         }
 
         // Point DLSS5_Feed.fx at the LumeniteFX Kernel vectors.
-        if (file_exists(game_ini))
-            ensure_mv_provider_def(game_ini, rec, log);
+        if (file_exists(reshade_ini))
+            ensure_mv_provider_def(reshade_ini, rec, log);
         else if (opts.install_lumenite)
             log(L"NOTE: no ReShade.ini yet - set DLSS5_MV_PROVIDER=3 in ReShade's "
                 L"preprocessor definitions after the first game run.");
         if (rec.is_32bit) {
-            std::wstring host_ini = path_combine(path_combine(game_dir, L"host64"), L"ReShade.ini");
+            std::wstring host_ini = path_combine(path_combine(reshade_dir, L"host64"), L"ReShade.ini");
             normalize_search_paths(host_ini, rec, log);
             if (file_exists(host_ini))
                 ensure_mv_provider_def(host_ini, rec, log);
         }
 
-        // 6) Optional Vulkan layer.
+        // 7) Optional Vulkan layer.
         if (opts.install_vulkan_layer) {
             if (feeder.vk_layer_zip.local_path.empty())
                 log(L"Vulkan layer requested but not published in this Feeder release - skipped.");
             else {
                 log(L"Extracting Vulkan layer...");
-                auto files = zip_extract_matching(feeder.vk_layer_zip.local_path, game_dir, {L"*"});
+                auto files = zip_extract_matching(feeder.vk_layer_zip.local_path, reshade_dir, {L"*"});
                 for (const auto& f : files) sink.record_new(f);
                 rec.vulkan_layer = true;
                 log(L"Vulkan layer installed. If the game misses Vulkan interop extensions, "
@@ -397,10 +454,12 @@ InstallResult run_uninstall(const std::wstring& game_dir, const LogFn& log) {
             }
         }
 
+        const std::wstring reshade_dir = rec.effective_reshade_dir();
+
         // ReShade leftovers created by its setup that we did not record.
         if (rec.reshade_by_us) {
             for (const wchar_t* extra : {L"ReShade.log", L"ReShade.ini.bak", L"dxgi.log"})
-                delete_file(path_combine(game_dir, extra));
+                delete_file(path_combine(reshade_dir, extra));
         }
 
         // Put back any ReShade.ini keys we changed (exact-case text restore;
@@ -412,7 +471,12 @@ InstallResult run_uninstall(const std::wstring& game_dir, const LogFn& log) {
             log(L"Restored " + it->key + L" in " + path_filename(it->path));
         }
 
-        // Tidy empty folders we created.
+        // Tidy empty folders we created (both possible locations - the guards
+        // make this safe).
+        remove_dir_if_empty(path_combine(reshade_dir, L"reshade-shaders\\Shaders\\include"));
+        remove_dir_if_empty(path_combine(reshade_dir, L"reshade-shaders\\Shaders"));
+        remove_dir_if_empty(path_combine(reshade_dir, L"reshade-shaders"));
+        remove_dir_if_empty(path_combine(reshade_dir, L"host64"));
         remove_dir_if_empty(path_combine(game_dir, L"reshade-shaders\\Shaders\\include"));
         remove_dir_if_empty(path_combine(game_dir, L"reshade-shaders\\Shaders"));
         remove_dir_if_empty(path_combine(game_dir, L"reshade-shaders"));

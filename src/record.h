@@ -22,17 +22,20 @@ struct IniTouch {
 };
 
 struct InstallRecord {
-    std::wstring tool_version = L"1.1.3";
+    std::wstring tool_version = L"1.2.0";
     std::wstring timestamp;
     std::wstring game_exe;
     std::wstring game_dir;
+    std::wstring reshade_dir;    // where ReShade actually lives (setup may redirect, e.g. Source games -> bin\)
     bool is_32bit = false;
-    bool reshade_by_us = false;   // we installed ReShade (dxgi.dll + ReShade.ini)
+    bool d3d9_translate = false; // dgVoodoo2 translation installed
+    bool reshade_by_us = false;  // we installed ReShade (dxgi.dll + ReShade.ini)
     bool vulkan_layer = false;
     std::vector<RecordedFile> files;
     std::vector<IniTouch> ini_touched;
 
     std::wstring record_path() const { return game_dir + L"\\feedkit.install.json"; }
+    std::wstring effective_reshade_dir() const { return reshade_dir.empty() ? game_dir : reshade_dir; }
 };
 
 struct IndexEntry {

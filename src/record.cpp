@@ -63,7 +63,9 @@ bool record_save(const InstallRecord& rec) {
     j += L"  \"timestamp\": " + q(rec.timestamp) + L",\n";
     j += L"  \"game_exe\": " + q(rec.game_exe) + L",\n";
     j += L"  \"game_dir\": " + q(rec.game_dir) + L",\n";
+    j += L"  \"reshade_dir\": " + q(rec.reshade_dir) + L",\n";
     j += L"  \"is_32bit\": " + std::wstring(rec.is_32bit ? L"true" : L"false") + L",\n";
+    j += L"  \"d3d9_translate\": " + std::wstring(rec.d3d9_translate ? L"true" : L"false") + L",\n";
     j += L"  \"reshade_by_us\": " + std::wstring(rec.reshade_by_us ? L"true" : L"false") + L",\n";
     j += L"  \"vulkan_layer\": " + std::wstring(rec.vulkan_layer ? L"true" : L"false") + L",\n";
     j += L"  \"files\": [\n";
@@ -93,6 +95,8 @@ static bool rec_from_json(const Json& j, InstallRecord& out) {
     out.timestamp = j.get_str(L"timestamp");
     out.game_exe = j.get_str(L"game_exe");
     out.game_dir = j.get_str(L"game_dir");
+    out.reshade_dir = j.get_str(L"reshade_dir"); // absent in older records -> empty -> game_dir
+    out.d3d9_translate = get_bool(j, L"d3d9_translate");
     out.is_32bit = get_bool(j, L"is_32bit");
     out.reshade_by_us = get_bool(j, L"reshade_by_us");
     out.vulkan_layer = get_bool(j, L"vulkan_layer");

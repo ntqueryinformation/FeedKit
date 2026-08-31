@@ -334,6 +334,7 @@ void consume_actions(HWND hwnd, const ui::AppActions& a) {
             std::lock_guard<std::mutex> lk(g_state.mtx);
             opts.game_exe = g_state.exe_path;
             opts.install_lumenite = g_state.lumenite;
+            opts.d3d9_translate = g_state.d3d9;
             opts.install_vulkan_layer = g_state.vulkan;
         }
         if (fk::file_exists(opts.game_exe))
@@ -404,7 +405,7 @@ int APIENTRY wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nCmdShow) {
     {
         std::lock_guard<std::mutex> lk(g_state.mtx);
         g_state.log.push_back({to_utf8(L"00:00:00"),
-                               to_utf8(L"FeedKit v1.1 - pick a game .exe (or drop it here), then Install. "
+                               to_utf8(L"FeedKit v1.2 - pick a game .exe (or drop it here), then Install. "
                                        L"Everything is fetched fresh from upstream on each install."),
                                IM_COL32(139, 148, 158, 255)});
     }
