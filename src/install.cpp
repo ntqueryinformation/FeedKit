@@ -312,11 +312,24 @@ InstallResult run_install(const InstallOptions& opts, const LogFn& log, const Pr
                 reshade_dir = trim(base);
         }
 
-        // D3D9 mode note: dgVoodoo owns d3d9.dll and its D3D11 output makes
-        // ReShade's dxgi.dll load from the SAME folder the engine resolves
-        // d3d9 from. For Source-style games that folder is the setup's
-        // redirect dir (bin\) - the engine's altered DLL search path looks
-        // there first - so we deliberately FOLLOW the redirect here.
+        // D3D9 mode: Source-style engines resolve d3d9.dll from bin\ (altered
+        // search path - the game folder is skipped), while dgVoodoo's D3D11
+        // output pulls dxgi.dll through the standard search, which finds the
+        // game folder first. BOTH locations must be populated: setup output
+        // (redirect dir, usually bin\) is copied into the game folder, and the
+        // mirror at the end copies everything back into bin\.
+        if (opts.d3d9_translate && reshade_dir != game_dir) {
+            std::wstring src_dll = path_combine(reshade_dir, reshade_dll_name);
+            std::wstring src_ini = path_combine(reshade_dir, L"ReShade.ini");
+            if (file_exists(src_dll))
+                copy_file(src_dll, dxgi, true);
+            if (file_exists(src_ini))
+                copy_file(src_ini, game_ini, true);
+            delete_file(path_combine(reshade_dir, L"ReShadePreset.ini"));
+            log(L"Duplicated ReShade output into the game folder (D3D9 engines use "
+                L"both locations - see dgVoodoo notes in the README).");
+            reshade_dir = game_dir;
+        }
 
         if (need_reshade) {
             if (!file_exists(path_combine(reshade_dir, reshade_dll_name)))
@@ -448,14 +461,13 @@ InstallResult run_install(const InstallOptions& opts, const LogFn& log, const Pr
         }
 
         // 8) D3D9 dual-location mirror. Engines resolve d3d9.dll from different
-        // folders: plain loaders use the game folder, Source-style engines load
-        // bin\ modules with an altered search path that skips it. Mirror every
-        // placed file into game_dir\bin (hardlinks - same volume, no extra
-        // space) so either resolution order finds the full stack.
+        // folders: most use the game folder, Source-style engines load bin\
+        // modules with an altered search path that skips it. Mirror every
+        // placed file into the existing game_dir\bin (hardlinks - same volume,
+        // no extra space) so either resolution order finds the full stack.
         if (opts.d3d9_translate) {
             std::wstring alt_dir = path_combine(game_dir, L"bin");
-            if (_wcsicmp(alt_dir.c_str(), reshade_dir.c_str()) != 0 &&
-                (dir_exists(alt_dir) || make_dirs(alt_dir))) {
+            if (_wcsicmp(alt_dir.c_str(), reshade_dir.c_str()) != 0 && dir_exists(alt_dir)) {
                 size_t base_count = rec.files.size();
                 int mirrored = 0;
                 for (size_t i = 0; i < base_count; i++) {
