@@ -308,11 +308,12 @@ InstallResult run_install(const InstallOptions& opts, const LogFn& log, const Pr
         // there first - so we deliberately FOLLOW the redirect here.
 
         if (need_reshade) {
-            if (!file_exists(path_combine(reshade_dir, L"dxgi.dll")))
-                fail(L"ReShade setup reported success but dxgi.dll is missing (looked in " + reshade_dir + L").");
+            if (!file_exists(path_combine(reshade_dir, reshade_dll_name)))
+                fail(L"ReShade setup reported success but " + reshade_dll_name +
+                     L" is missing (looked in " + reshade_dir + L").");
             rec.reshade_by_us = true;
             rec.reshade_dir = reshade_dir;
-            sink.record_new(path_combine(reshade_dir, L"dxgi.dll"));
+            sink.record_new(path_combine(reshade_dir, reshade_dll_name));
             sink.record_new(game_ini); // root ini (marker when redirected, the real one otherwise)
             if (reshade_dir != game_dir)
                 sink.record_new(path_combine(reshade_dir, L"ReShade.ini"));
