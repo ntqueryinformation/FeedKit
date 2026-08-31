@@ -314,6 +314,8 @@ InstallResult run_install(const InstallOptions& opts, const LogFn& log, const Pr
             sink.place(dgvoodoo.cpl, path_combine(reshade_dir, L"dgVoodooCpl.exe"));
             sink.place(dgvoodoo.conf, path_combine(reshade_dir, L"dgVoodoo.conf"));
 
+            // Configure the PLACED conf (not the staged copy).
+            const std::wstring placed_conf = path_combine(reshade_dir, L"dgVoodoo.conf");
             struct KV { const wchar_t* section; const wchar_t* key; const wchar_t* value; };
             const KV settings[] = {
                 {L"DirectX", L"DisableAndPassThru", L"false"},
@@ -324,12 +326,12 @@ InstallResult run_install(const InstallOptions& opts, const LogFn& log, const Pr
             };
             for (const auto& s : settings) {
                 std::wstring orig;
-                ini_get_exact(dgvoodoo.conf, s.section, s.key, orig);
+                ini_get_exact(placed_conf, s.section, s.key, orig);
                 if (lower(trim(orig)) == lower(s.value))
                     continue;
-                if (!ini_set_exact(dgvoodoo.conf, s.section, s.key, s.value))
-                    fail(std::wstring(L"Cannot update ") + s.key + L" in " + dgvoodoo.conf);
-                rec.ini_touched.push_back({dgvoodoo.conf, s.section, s.key, trim(orig)});
+                if (!ini_set_exact(placed_conf, s.section, s.key, s.value))
+                    fail(std::wstring(L"Cannot update ") + s.key + L" in " + placed_conf);
+                rec.ini_touched.push_back({placed_conf, s.section, s.key, trim(orig)});
             }
             log(L"dgVoodoo2 configured for DLSS5-Feeder: OutputAPI=d3d11_fl11_0, "
                 L"VideoCard=internal3D, VRAM=1024, DisableAndPassThru=false.");
