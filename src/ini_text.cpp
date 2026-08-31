@@ -8,9 +8,18 @@ namespace fk {
 
 namespace {
 
-std::vector<std::wstring> split_lines(const std::string& data, bool& trailing_newline) {
+// ReShade Setup writes ReShade.ini with a UTF-8 BOM; the runtime rewrites it
+// without. Track the BOM so section matching sees the real first line.
+bool load_ini_lines(const std::wstring& file, std::vector<std::wstring>& lines, bool& trailing_newline, bool& had_bom) {
+    std::string data;
+    if (!read_file(file, data))
+        return false;
+    had_bom = data.size() >= 3 && (unsigned char)data[0] == 0xEF && (unsigned char)data[1] == 0xBB &&
+              (unsigned char)data[2] == 0xBF;
+    if (had_bom)
+        data.erase(0, 3);
+
     std::wstring w = to_wide(data);
-    std::vector<std::wstring> lines;
     size_t start = 0;
     while (start < w.size()) {
         size_t nl = w.find(L'\n', start);
@@ -21,18 +30,20 @@ std::vector<std::wstring> split_lines(const std::string& data, bool& trailing_ne
         start = nl + 1;
     }
     trailing_newline = !w.empty() && w.back() == L'\n';
-    if (lines.empty()) trailing_newline = false;
-    return lines;
+    return true;
 }
 
-std::string join_lines(const std::vector<std::wstring>& lines, bool trailing_newline) {
+bool save_ini_lines(const std::wstring& file, const std::vector<std::wstring>& lines,
+                    bool trailing_newline, bool had_bom) {
     std::wstring w;
     for (size_t i = 0; i < lines.size(); i++) {
         w += lines[i];
         if (i + 1 < lines.size() || trailing_newline)
             w += L"\r\n";
     }
-    return to_utf8(w);
+    std::string out = to_utf8(w);
+    std::string bom = had_bom ? "\xEF\xBB\xBF" : "";
+    return write_file(file, (bom + out).c_str(), bom.size() + out.size());
 }
 
 bool find_key_line(const std::vector<std::wstring>& lines, const std::wstring& section,
@@ -58,11 +69,10 @@ bool find_key_line(const std::vector<std::wstring>& lines, const std::wstring& s
 bool ini_get_exact(const std::wstring& file, const std::wstring& section,
                    const std::wstring& key, std::wstring& value) {
     value.clear();
-    std::string data;
-    if (!read_file(file, data))
+    bool trailing = false, had_bom = false;
+    std::vector<std::wstring> lines;
+    if (!load_ini_lines(file, lines, trailing, had_bom))
         return false;
-    bool trailing;
-    std::vector<std::wstring> lines = split_lines(data, trailing);
     size_t idx = 0;
     if (!find_key_line(lines, section, key, idx))
         return false;
@@ -73,11 +83,10 @@ bool ini_get_exact(const std::wstring& file, const std::wstring& section,
 
 bool ini_set_exact(const std::wstring& file, const std::wstring& section,
                    const std::wstring& key, const std::wstring& value) {
-    std::string data;
-    if (!read_file(file, data))
+    bool trailing = false, had_bom = false;
+    std::vector<std::wstring> lines;
+    if (!load_ini_lines(file, lines, trailing, had_bom))
         return false;
-    bool trailing;
-    std::vector<std::wstring> lines = split_lines(data, trailing);
 
     size_t idx = 0;
     if (find_key_line(lines, section, key, idx)) {
@@ -110,8 +119,7 @@ bool ini_set_exact(const std::wstring& file, const std::wstring& section,
         lines.insert(lines.begin() + insert_at, key + L"=" + value);
     }
 
-    const std::string out = join_lines(lines, trailing);
-    return write_file(file, out.c_str(), out.size());
+    return save_ini_lines(file, lines, trailing, had_bom);
 }
 
 } // namespace fk
