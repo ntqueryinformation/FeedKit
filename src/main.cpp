@@ -37,6 +37,7 @@ enum {
     IDC_PREV,
     IDC_OPENLOG,
     IDC_NEXTSTEPS,
+    IDC_LUMENITE,
 };
 
 // Worker -> UI messages
@@ -48,7 +49,7 @@ enum {
 constexpr wchar_t kWindowClass[] = L"FeedKitMainWindow";
 constexpr wchar_t kWindowTitle[] = L"FeedKit - DLSS5-Feeder installer";
 
-HWND g_exe_edit, g_browse, g_install, g_uninstall, g_openfolder, g_vulkan;
+HWND g_exe_edit, g_browse, g_install, g_uninstall, g_openfolder, g_vulkan, g_lumenite;
 HWND g_log, g_progress, g_bitness, g_prev, g_openlog, g_nextsteps;
 HFONT g_ui_font, g_mono_font;
 bool g_busy = false;
@@ -101,6 +102,7 @@ void update_buttons() {
     EnableWindow(g_openfolder, valid && !g_busy);
     EnableWindow(g_browse, !g_busy);
     EnableWindow(g_vulkan, !g_busy);
+    EnableWindow(g_lumenite, !g_busy);
 }
 
 void refresh_prev_installs() {
@@ -215,6 +217,7 @@ void browse_for_exe(HWND hwnd) {
 void start_install(HWND hwnd) {
     Job job;
     job.opts.game_exe = current_exe();
+    job.opts.install_lumenite = SendMessageW(g_lumenite, BM_GETCHECK, 0, 0) == BST_CHECKED;
     job.opts.install_vulkan_layer = SendMessageW(g_vulkan, BM_GETCHECK, 0, 0) == BST_CHECKED;
     auto* shared = new std::shared_ptr<Job>(std::make_shared<Job>(job));
     set_busy(true);
@@ -261,44 +264,49 @@ LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         g_browse = make_control(hwnd, L"BUTTON", L"Browse...", BS_PUSHBUTTON, 618, 33, 96, 27, IDC_BROWSE);
         g_bitness = make_control(hwnd, L"STATIC", L"", SS_LEFT, 14, 66, 680, 20, IDC_BITNESS);
 
+        g_lumenite = make_control(hwnd, L"BUTTON",
+                                  L"Install LumeniteFX motion-vector provider (recommended)",
+                                  BS_AUTOCHECKBOX, 12, 88, 560, 22, IDC_LUMENITE);
+        SendMessageW(g_lumenite, BM_SETCHECK, BST_CHECKED, 0);
         g_vulkan = make_control(hwnd, L"BUTTON",
                                 L"Also install the Vulkan layer (fallback for Vulkan games)",
-                                BS_AUTOCHECKBOX, 12, 90, 560, 22, IDC_VULKAN);
+                                BS_AUTOCHECKBOX, 12, 112, 560, 22, IDC_VULKAN);
 
-        make_control(hwnd, L"STATIC", L"Previous installs:", SS_LEFT, 12, 120, 200, 20, -1);
+        make_control(hwnd, L"STATIC", L"Previous installs:", SS_LEFT, 12, 142, 200, 20, -1);
         g_prev = make_control(hwnd, L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_VSCROLL,
-                              12, 140, 702, 200, IDC_PREV);
+                              12, 162, 702, 200, IDC_PREV);
 
-        g_install = make_control(hwnd, L"BUTTON", L"Install", BS_PUSHBUTTON, 12, 174, 130, 34, IDC_INSTALL);
-        g_uninstall = make_control(hwnd, L"BUTTON", L"Uninstall", BS_PUSHBUTTON, 150, 174, 130, 34, IDC_UNINSTALL);
-        g_openfolder = make_control(hwnd, L"BUTTON", L"Open game folder", BS_PUSHBUTTON, 288, 174, 150, 34, IDC_OPENFOLDER);
+        g_install = make_control(hwnd, L"BUTTON", L"Install", BS_PUSHBUTTON, 12, 196, 130, 34, IDC_INSTALL);
+        g_uninstall = make_control(hwnd, L"BUTTON", L"Uninstall", BS_PUSHBUTTON, 150, 196, 130, 34, IDC_UNINSTALL);
+        g_openfolder = make_control(hwnd, L"BUTTON", L"Open game folder", BS_PUSHBUTTON, 288, 196, 150, 34, IDC_OPENFOLDER);
 
         make_control(hwnd, L"STATIC",
                      L"Upstream sources are fetched fresh on every install: reshade.me, "
-                     L"github.com/jlrouzies-fr/DLSS5-Feeder, RankFTW/RHI.",
-                     SS_LEFT, 14, 216, 700, 34, -1);
+                     L"github.com/jlrouzies-fr/DLSS5-Feeder, RankFTW/RHI, LumeniteFX.",
+                     SS_LEFT, 14, 238, 700, 34, -1);
 
         // Log pane
-        make_control(hwnd, L"BUTTON", L"Log", BS_GROUPBOX, 12, 252, 702, 260, -1);
+        make_control(hwnd, L"BUTTON", L"Log", BS_GROUPBOX, 12, 274, 702, 260, -1);
         g_log = CreateWindowExW(WS_EX_CLIENTEDGE, L"LISTBOX", L"",
                                 WS_CHILD | WS_VISIBLE | WS_VSCROLL | LBS_NOINTEGRALHEIGHT | LBS_NOTIFY,
-                                S(20), S(272), S(686), S(232), hwnd, (HMENU)(INT_PTR)IDC_LOG, nullptr, nullptr);
+                                S(20), S(294), S(686), S(232), hwnd, (HMENU)(INT_PTR)IDC_LOG, nullptr, nullptr);
         SendMessageW(g_log, WM_SETFONT, (WPARAM)g_mono_font, TRUE);
 
         g_progress = CreateWindowExW(0, PROGRESS_CLASSW, L"", WS_CHILD | WS_VISIBLE | PBS_MARQUEE,
-                                     S(12), S(520), S(566), S(22), hwnd, (HMENU)(INT_PTR)IDC_PROGRESS, nullptr, nullptr);
+                                     S(12), S(542), S(566), S(22), hwnd, (HMENU)(INT_PTR)IDC_PROGRESS, nullptr, nullptr);
         SendMessageW(g_progress, PBM_SETMARQUEE, 0, 25);
         g_openlog = make_control(hwnd, L"BUTTON", L"Open downloads folder", BS_PUSHBUTTON,
-                                 586, 517, 128, 28, IDC_OPENLOG);
+                                 586, 539, 128, 28, IDC_OPENLOG);
 
         // Next steps
         g_nextsteps = make_control(
             hwnd, L"STATIC",
-            L"After installing:  (1) install a motion-vector provider - recommended LumeniteFX Kernel - and set "
-            L"DLSS5_MV_PROVIDER=3 in the DLSS5_Feed.fx preprocessor definitions.  "
-            L"(2) In game, open the ReShade overlay, enable the LUMEN technique, then DLSS 5 Feed, then the "
-            L"neural rendering technique; keep MSAA/SSAA off.  (3) Verify via dlss5-feed.log in the game folder.",
-            SS_LEFT, 12, 548, 702, 60, IDC_NEXTSTEPS);
+            L"After installing:  open the ReShade overlay (Home key), enable the LUMEN technique, then "
+            L"DLSS 5 Feed, then the neural rendering technique; keep MSAA/SSAA off.  "
+            L"Verify via dlss5-feed.log in the game folder.  "
+            L"(With LumeniteFX installed, DLSS5_MV_PROVIDER=3 is set for you - if you skipped it, "
+            L"install a motion-vector provider and set DLSS5_MV_PROVIDER yourself.)",
+            SS_LEFT, 12, 572, 702, 64, IDC_NEXTSTEPS);
 
         DragAcceptFiles(hwnd, TRUE);
         refresh_prev_installs();
@@ -391,7 +399,7 @@ LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 
     case WM_GETMINMAXINFO: {
         auto* mmi = (MINMAXINFO*)lp;
-        mmi->ptMinTrackSize = {S(760), S(660)};
+        mmi->ptMinTrackSize = {S(760), S(700)};
         return 0;
     }
 
@@ -423,8 +431,8 @@ int APIENTRY wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nCmdShow) {
     wc.lpszClassName = kWindowClass;
     RegisterClassExW(&wc);
 
-    // Client area: 736 x 620 at design DPI.
-    RECT rc{0, 0, S(736), S(620)};
+    // Client area: 736 x 644 at design DPI.
+    RECT rc{0, 0, S(736), S(644)};
     AdjustWindowRect(&rc, (WS_OVERLAPPEDWINDOW & ~(WS_THICKFRAME | WS_MAXIMIZEBOX)), FALSE);
 
     HWND hwnd = CreateWindowExW(0, kWindowClass, kWindowTitle,

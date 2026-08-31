@@ -45,7 +45,18 @@ bool record_save(const InstallRecord& rec) {
         j += L"    { \"path\": " + q(f.path) + L", \"backup\": " + q(f.backup) + L" }";
         j += (i + 1 < rec.files.size()) ? L",\n" : L"\n";
     }
-    j += L"  ]\n}\n";
+    j += L"  ]\n";
+    if (!rec.ini_touched.empty()) {
+        j += L"  ,\"ini_touched\": [\n";
+        for (size_t i = 0; i < rec.ini_touched.size(); i++) {
+            const auto& t = rec.ini_touched[i];
+            j += L"    { \"path\": " + q(t.path) + L", \"section\": " + q(t.section) +
+                 L", \"key\": " + q(t.key) + L", \"original\": " + q(t.original) + L" }";
+            j += (i + 1 < rec.ini_touched.size()) ? L",\n" : L"\n";
+        }
+        j += L"  ]\n";
+    }
+    j += L"}\n";
     return write_file(rec.record_path(), j.c_str(), j.size() * sizeof(wchar_t));
 }
 
@@ -63,6 +74,16 @@ static bool rec_from_json(const Json& j, InstallRecord& out) {
             rf.path = f.get_str(L"path");
             rf.backup = f.get_str(L"backup");
             if (!rf.path.empty()) out.files.push_back(std::move(rf));
+        }
+    }
+    if (const Json* inis = j.find(L"ini_touched"); inis && inis->is(Json::Type::Array)) {
+        for (const auto& t : inis->items) {
+            IniTouch it;
+            it.path = t.get_str(L"path");
+            it.section = t.get_str(L"section", L"GENERAL");
+            it.key = t.get_str(L"key");
+            it.original = t.get_str(L"original");
+            if (!it.path.empty() && !it.key.empty()) out.ini_touched.push_back(std::move(it));
         }
     }
     return !out.game_dir.empty();

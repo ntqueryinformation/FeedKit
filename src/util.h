@@ -46,6 +46,9 @@ bool is_dir_empty(const std::wstring& path);
 bool remove_dir_if_empty(const std::wstring& path);
 uint64_t file_size(const std::wstring& path);
 
+// All files under `dir`, recursively, as absolute paths.
+std::vector<std::wstring> list_files_recursive(const std::wstring& dir);
+
 // Returns true if the file can be opened for exclusive write access.
 bool file_is_writable(const std::wstring& path);
 

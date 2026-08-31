@@ -303,4 +303,84 @@ ReshadeBundle fetch_reshade(const LogFn& log, const ProgressFn& progress) {
     return out;
 }
 
+LumeniteBundle fetch_lumenite(const LogFn& log, const ProgressFn& progress) {
+    LumeniteBundle out;
+    log(L"Fetching LumeniteFX (motion-vector provider) from github.com/umar-afzaal/LumeniteFX...");
+
+    // Resolve the default branch so renames don't break us.
+    std::wstring branch = L"main";
+    HttpResponse meta = http_get(L"https://api.github.com/repos/umar-afzaal/LumeniteFX");
+    if (meta.ok) {
+        Json j;
+        if (Json::parse(meta.body, j)) {
+            std::wstring b = j.get_str(L"default_branch");
+            if (!b.empty()) branch = b;
+        }
+    }
+    out.branch = branch;
+    log(L"  source branch: " + branch);
+
+    std::wstring zip = path_combine(fetch_temp_dir(), L"LumeniteFX.zip");
+    std::wstring url = fmt(L"https://codeload.github.com/umar-afzaal/LumeniteFX/zip/refs/heads/%s", branch.c_str());
+    download(url, zip, progress);
+
+    out.staging_dir = path_combine(fetch_temp_dir(), L"lumenite_stage");
+    if (dir_exists(out.staging_dir))
+        delete_dir_recursive(out.staging_dir);
+    make_dirs(out.staging_dir);
+
+    mz_zip_archive z{};
+    if (!mz_zip_reader_init_file(&z, to_utf8(zip).c_str(), 0))
+        fail(L"Cannot open LumeniteFX zipball");
+
+    int count = (int)mz_zip_reader_get_num_files(&z);
+    for (int i = 0; i < count; i++) {
+        char name_buf[512] = {};
+        mz_zip_reader_get_filename(&z, i, name_buf, sizeof(name_buf));
+        std::wstring name = to_wide(name_buf);
+        if (mz_zip_reader_is_file_a_directory(&z, (mz_uint)i)) continue;
+
+        // Strip the repo-root prefix ("LumeniteFX-<branch>/").
+        size_t slash = name.find(L'/');
+        if (slash == std::wstring::npos) continue;
+        std::wstring rel = name.substr(slash + 1);
+        if (rel.empty()) continue;
+
+        // Map to the reshade-shaders layout, preserving subfolders.
+        std::wstring dest_rel;
+        if (starts_with(rel, L"Shaders/"))
+            dest_rel = std::wstring(L"reshade-shaders\\Shaders\\") + rel.substr(wcslen(L"Shaders/"));
+        else if (starts_with(rel, L"Textures/"))
+            dest_rel = std::wstring(L"reshade-shaders\\Textures\\") + rel.substr(wcslen(L"Textures/"));
+        else
+            continue; // README, LICENSE, NOTICE, ...
+        for (auto& c : dest_rel)
+            if (c == L'/') c = L'\\';
+
+        std::wstring dest = path_combine(out.staging_dir, dest_rel);
+        if (!make_dirs(path_parent(dest))) {
+            mz_zip_reader_end(&z);
+            fail(L"Cannot create directory: " + path_parent(dest));
+        }
+        size_t size = 0;
+        void* data = mz_zip_reader_extract_to_heap(&z, i, &size, 0);
+        if (!data) continue;
+        bool ok = write_file(dest, data, size);
+        mz_free(data);
+        if (!ok) {
+            mz_zip_reader_end(&z);
+            fail(L"Failed writing " + dest);
+        }
+        out.files.push_back(std::move(dest));
+    }
+    mz_zip_reader_end(&z);
+
+    if (out.files.empty())
+        fail(L"LumeniteFX zipball contained no shader files - repo layout may have changed.");
+    log(fmt(L"  staged %u files (lumenite_*.fx, include\\*.fxh, Textures\\lumenite_bluenoise256.png)",
+            (unsigned)out.files.size()));
+    out.ok = true;
+    return out;
+}
+
 } // namespace fk

@@ -12,6 +12,7 @@ using ProgressFn = std::function<void(uint64_t done, uint64_t total)>;
 
 struct InstallOptions {
     std::wstring game_exe;
+    bool install_lumenite = true;      // recommended, on by default in the GUI
     bool install_vulkan_layer = false;
 };
 

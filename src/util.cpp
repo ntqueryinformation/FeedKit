@@ -259,6 +259,26 @@ uint64_t file_size(const std::wstring& path) {
     return ((uint64_t)fa.nFileSizeHigh << 32) | fa.nFileSizeLow;
 }
 
+std::vector<std::wstring> list_files_recursive(const std::wstring& dir) {
+    std::vector<std::wstring> out;
+    std::wstring spec = dir + L"\\*";
+    WIN32_FIND_DATAW fd;
+    HANDLE h = FindFirstFileW(spec.c_str(), &fd);
+    if (h == INVALID_HANDLE_VALUE) return out;
+    do {
+        std::wstring name = fd.cFileName;
+        if (name == L"." || name == L"..") continue;
+        std::wstring full = path_combine(dir, name);
+        if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+            for (auto& f : list_files_recursive(full)) out.push_back(std::move(f));
+        } else {
+            out.push_back(std::move(full));
+        }
+    } while (FindNextFileW(h, &fd));
+    FindClose(h);
+    return out;
+}
+
 bool file_is_writable(const std::wstring& path) {
     if (!file_exists(path)) return true;
     HANDLE h = CreateFileW(path.c_str(), GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, 0, nullptr);

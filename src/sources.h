@@ -48,6 +48,15 @@ struct ReshadeBundle {
     bool ok = false;
 };
 
+// LumeniteFX motion-vector provider shaders, staged with their final
+// reshade-shaders\ relative layout so they can be copied into a game folder.
+struct LumeniteBundle {
+    std::wstring branch;      // default branch the zipball came from
+    std::wstring staging_dir; // contains reshade-shaders\Shaders\... and ...\Textures\...
+    std::vector<std::wstring> files; // staged files, absolute paths
+    bool ok = false;
+};
+
 // Temporary working directory for this session's downloads.
 std::wstring fetch_temp_dir();
 
@@ -65,6 +74,12 @@ NgxBundle fetch_ngx_dlls(const LogFn& log, const ProgressFn& progress);
 
 // Latest ReShade Addon setup from reshade.me (version scraped from the site).
 ReshadeBundle fetch_reshade(const LogFn& log, const ProgressFn& progress);
+
+// LumeniteFX (github.com/umar-afzaal/LumeniteFX) repo zipball of the default
+// branch, extracted into a staging dir mirroring reshade-shaders\ layout:
+//   Shaders/**  -> staging\reshade-shaders\Shaders\**
+//   Textures/** -> staging\reshade-shaders\Textures\**
+LumeniteBundle fetch_lumenite(const LogFn& log, const ProgressFn& progress);
 
 // Extract files from a zip whose name matches any of `patterns` (simple wildcard
 // with *). Returns absolute paths of extracted files.

@@ -12,8 +12,17 @@ struct RecordedFile {
     std::wstring backup;  // absolute path of the .feedkit.bak we made, empty if none
 };
 
+// A ReShade.ini key we changed (e.g. PreProcessorDefinitions for the
+// motion-vector provider). `original` empty = key was absent before us.
+struct IniTouch {
+    std::wstring path;      // absolute ini path
+    std::wstring section;
+    std::wstring key;
+    std::wstring original;
+};
+
 struct InstallRecord {
-    std::wstring tool_version = L"1.0.0";
+    std::wstring tool_version = L"1.1.0";
     std::wstring timestamp;
     std::wstring game_exe;
     std::wstring game_dir;
@@ -21,6 +30,7 @@ struct InstallRecord {
     bool reshade_by_us = false;   // we installed ReShade (dxgi.dll + ReShade.ini)
     bool vulkan_layer = false;
     std::vector<RecordedFile> files;
+    std::vector<IniTouch> ini_touched;
 
     std::wstring record_path() const { return game_dir + L"\\feedkit.install.json"; }
 };

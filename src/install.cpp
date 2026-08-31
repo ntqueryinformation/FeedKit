@@ -95,6 +95,35 @@ bool reshade_headless_install(const std::wstring& setup_exe, const std::wstring&
     return true;
 }
 
+// --- ReShade.ini preprocessor definitions -------------------------------------
+
+// Points DLSS5_Feed.fx's DLSS5_MV_PROVIDER at LumeniteFX Kernel (= 3) and
+// remembers the previous value so uninstall can put it back.
+void ensure_mv_provider_def(const std::wstring& ini_path, InstallRecord& rec, const LogFn& log) {
+    wchar_t buf[4096] = {};
+    GetPrivateProfileStringW(L"GENERAL", L"PreProcessorDefinitions", L"", buf, 4096, ini_path.c_str());
+    std::wstring orig = buf;
+
+    std::wstring kept;
+    for (const auto& tok : split(orig, L',')) {
+        std::wstring t = trim(tok);
+        if (t.empty()) continue;
+        if (starts_with(lower(t), L"dlss5_mv_provider")) continue;
+        kept += (kept.empty() ? L"" : L",") + t;
+    }
+    std::wstring newval = kept.empty() ? std::wstring(L"DLSS5_MV_PROVIDER=3")
+                                       : kept + L",DLSS5_MV_PROVIDER=3";
+    if (newval == orig) {
+        log(L"ReShade.ini already points DLSS5_MV_PROVIDER at LumeniteFX Kernel.");
+        return;
+    }
+    if (!WritePrivateProfileStringW(L"GENERAL", L"PreProcessorDefinitions",
+                                    newval.c_str(), ini_path.c_str()))
+        fail(L"Cannot update PreProcessorDefinitions in " + ini_path);
+    rec.ini_touched.push_back({ini_path, L"GENERAL", L"PreProcessorDefinitions", orig});
+    log(L"Set DLSS5_MV_PROVIDER=3 (LumeniteFX Kernel) in " + path_filename(ini_path));
+}
+
 // --- file placement with backup + record -------------------------------------
 
 struct Sink {
@@ -180,6 +209,9 @@ InstallResult run_install(const InstallOptions& opts, const LogFn& log, const Pr
         FeederBundle feeder = fetch_feeder(log, progress);
         RenoDxBundle renodx = fetch_renodx_dlss5(log, progress);
         NgxBundle ngx = fetch_ngx_dlls(log, progress);
+        LumeniteBundle lumenite;
+        if (opts.install_lumenite)
+            lumenite = fetch_lumenite(log, progress);
 
         Sink sink{&rec, &log};
 
@@ -228,7 +260,31 @@ InstallResult run_install(const InstallOptions& opts, const LogFn& log, const Pr
             sink.place(ngx.sr_dll_path, path_combine(game_dir, L"nvngx_dlss.dll"));
         }
 
-        // 5) Optional Vulkan layer.
+        // 5) LumeniteFX motion-vector provider (recommended, default on).
+        if (opts.install_lumenite) {
+            log(L"Installing LumeniteFX shaders...");
+            for (const auto& src : lumenite.files) {
+                std::wstring rel = src.substr(lumenite.staging_dir.size() + 1);
+                sink.place(src, path_combine(game_dir, rel));
+            }
+            // Point DLSS5_Feed.fx at the LumeniteFX Kernel vectors.
+            std::wstring game_ini = path_combine(game_dir, L"ReShade.ini");
+            if (file_exists(game_ini))
+                ensure_mv_provider_def(game_ini, rec, log);
+            else
+                log(L"NOTE: no ReShade.ini yet - set DLSS5_MV_PROVIDER=3 in ReShade's "
+                    L"preprocessor definitions after the first game run.");
+            if (rec.is_32bit) {
+                std::wstring host_ini = path_combine(path_combine(game_dir, L"host64"), L"ReShade.ini");
+                if (file_exists(host_ini))
+                    ensure_mv_provider_def(host_ini, rec, log);
+            }
+        } else {
+            log(L"LumeniteFX skipped - install a motion-vector provider yourself and set "
+                L"DLSS5_MV_PROVIDER accordingly (Kernel = 3).");
+        }
+
+        // 6) Optional Vulkan layer.
         if (opts.install_vulkan_layer) {
             if (feeder.vk_layer_zip.local_path.empty())
                 log(L"Vulkan layer requested but not published in this Feeder release - skipped.");
@@ -242,7 +298,7 @@ InstallResult run_install(const InstallOptions& opts, const LogFn& log, const Pr
             }
         }
 
-        // 6) Record + index.
+        // 7) Record + index.
         record_save(rec);
         index_add(rec);
 
@@ -295,7 +351,17 @@ InstallResult run_uninstall(const std::wstring& game_dir, const LogFn& log) {
                 delete_file(path_combine(game_dir, extra));
         }
 
+        // Put back any ReShade.ini keys we changed (skip inis that are gone -
+        // WritePrivateProfileString would recreate the file otherwise).
+        for (auto it = rec.ini_touched.rbegin(); it != rec.ini_touched.rend(); ++it) {
+            if (!file_exists(it->path)) continue;
+            const wchar_t* val = it->original.empty() ? nullptr : it->original.c_str();
+            WritePrivateProfileStringW(it->section.c_str(), it->key.c_str(), val, it->path.c_str());
+            log(L"Restored " + it->key + L" in " + path_filename(it->path));
+        }
+
         // Tidy empty folders we created.
+        remove_dir_if_empty(path_combine(game_dir, L"reshade-shaders\\Shaders\\include"));
         remove_dir_if_empty(path_combine(game_dir, L"reshade-shaders\\Shaders"));
         remove_dir_if_empty(path_combine(game_dir, L"reshade-shaders"));
         remove_dir_if_empty(path_combine(game_dir, L"host64"));

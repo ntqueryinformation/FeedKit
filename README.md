@@ -32,6 +32,7 @@ Nothing is bundled with FeedKit. **Every install fetches the current versions fr
 | DLSS5-Feeder | latest GitHub release of [DLSS5-Feeder](https://github.com/jlrouzies-fr/DLSS5-Feeder) | `dlss5-feed.addon64` / `dlss5-feed.addon32`, `DLSS5_Feed.fx` |
 | RenoDX DLSS5 add-on | newest release in [RankFTW/rhi-repo](https://github.com/RankFTW/rhi-repo/releases) | `renodx-dlss5.addon64` |
 | DLSS DLLs | DLSS versions published via [RHI's](https://github.com/RankFTW/RHI) `dlss_manifest.json` | `nvngx_dlssnr.dll` (ShortFuse build), `nvngx_dlss.dll` |
+| LumeniteFX (recommended, on by default) | repo of [umar-afzaal/LumeniteFX](https://github.com/umar-afzaal/LumeniteFX) | `lumenite_*.fx`, `include\*.fxh`, bluenoise texture; also sets `DLSS5_MV_PROVIDER=3` in `ReShade.ini` |
 
 ## What gets installed where
 
@@ -40,12 +41,18 @@ Nothing is bundled with FeedKit. **Every install fetches the current versions fr
 ```
 GameFolder\
 ├─ dxgi.dll                  (ReShade, add-on support)
-├─ ReShade.ini
+├─ ReShade.ini               (DLSS5_MV_PROVIDER=3 preset when LumeniteFX is installed)
 ├─ dlss5-feed.addon64
 ├─ renodx-dlss5.addon64
 ├─ nvngx_dlssnr.dll
 ├─ nvngx_dlss.dll
-└─ reshade-shaders\Shaders\DLSS5_Feed.fx
+└─ reshade-shaders\
+   ├─ Shaders\
+   │  ├─ DLSS5_Feed.fx
+   │  ├─ lumenite_*.fx               (LumeniteFX)
+   │  └─ include\lumenite_*.fxh      (LumeniteFX)
+   └─ Textures\
+      └─ lumenite_bluenoise256.png   (LumeniteFX)
 ```
 
 **32-bit game** - the Feeder add-on runs in-process, and the 64-bit stack (RenoDX add-on + NGX DLLs) runs inside the bundled `host64` helper:
@@ -55,7 +62,7 @@ GameFolder\
 ├─ dxgi.dll                  (ReShade 32-bit, add-on support)
 ├─ ReShade.ini
 ├─ dlss5-feed.addon32
-├─ reshade-shaders\Shaders\DLSS5_Feed.fx
+├─ reshade-shaders\          (DLSS5_Feed.fx + LumeniteFX files, as above)
 └─ host64\
    ├─ dlss5-feed-host64.exe
    ├─ dxgi.dll               (ReShade 64-bit, add-on support)
@@ -73,7 +80,7 @@ Everything FeedKit touches is recorded in `feedkit.install.json` in the game fol
 
 The last steps happen in-game (FeedKit can't click ReShade's overlay for you):
 
-1. **Install a motion-vector provider.** Recommended: [LumeniteFX Kernel](https://github.com/EndlessCG/LumeniteFX) - then set `DLSS5_MV_PROVIDER = 3` in the preprocessor definitions of `DLSS5_Feed.fx` (ReShade overlay -> Edit -> preprocessor definitions). Alternatives: iMMERSE Launchpad, VORT, LumeniteFX QuantMotion, or anything writing `texMotionVectors`.
+1. **Motion vectors:** with the recommended LumeniteFX checkbox left on, the provider shaders are installed and `DLSS5_MV_PROVIDER=3` (LumeniteFX Kernel) is set in `ReShade.ini` for you - nothing to do. If you unchecked it, install a motion-vector provider yourself (LumeniteFX Kernel, or iMMERSE Launchpad / VORT / anything writing `texMotionVectors`) and set `DLSS5_MV_PROVIDER` accordingly in the preprocessor definitions of `DLSS5_Feed.fx`.
 2. **Enable in the ReShade overlay** (Home key): enable the *LUMEN* technique, then *DLSS 5 Feed*, then the neural rendering technique. Keep MSAA/SSAA off.
 3. **Verify** via `dlss5-feed.log` in the game folder.
 
@@ -106,6 +113,7 @@ Output: `build\Release\FeedKit.exe`.
 ## Credits and legal
 
 - [DLSS5-Feeder](https://github.com/jlrouzies-fr/DLSS5-Feeder) by jlrouzies-fr (MIT) - the actual magic. FeedKit is just an installer for it.
+- [LumeniteFX](https://github.com/umar-afzaal/LumeniteFX) by umar-afzaal - the recommended motion-vector provider, installed by default.
 - [RHI / RenoDX Commander](https://github.com/RankFTW/RHI) and the [rhi-repo](https://github.com/RankFTW/rhi-repo) release feed - source of the RenoDX DLSS5 add-on and the DLSS NR/SR DLL versions.
 - [ReShade](https://reshade.me) by crosire - downloaded and installed from the official site; its binaries are not redistributed here.
 - [RenoDX](https://github.com/clshortfuse/renodx) by ShortFuse and the RenoDX team.
