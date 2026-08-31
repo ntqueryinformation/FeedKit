@@ -416,7 +416,38 @@ InstallResult run_install(const InstallOptions& opts, const LogFn& log, const Pr
             }
         }
 
-        // 7) Record + index.
+        // 8) D3D9 dual-location mirror. Engines resolve d3d9.dll from different
+        // folders: plain loaders use the game folder, Source-style engines load
+        // bin\ modules with an altered search path that skips it. Mirror every
+        // placed file into game_dir\bin (hardlinks - same volume, no extra
+        // space) so either resolution order finds the full stack.
+        if (opts.d3d9_translate) {
+            std::wstring alt_dir = path_combine(game_dir, L"bin");
+            if (_wcsicmp(alt_dir.c_str(), reshade_dir.c_str()) != 0 &&
+                (dir_exists(alt_dir) || make_dirs(alt_dir))) {
+                size_t base_count = rec.files.size();
+                int mirrored = 0;
+                for (size_t i = 0; i < base_count; i++) {
+                    const std::wstring& src = rec.files[i].path;
+                    if (_wcsnicmp(src.c_str(), reshade_dir.c_str(), reshade_dir.size()) != 0 ||
+                        src[reshade_dir.size()] != L'\\')
+                        continue;
+                    std::wstring rel = src.substr(reshade_dir.size() + 1);
+                    std::wstring dst = path_combine(alt_dir, rel);
+                    delete_file(dst);
+                    if (CreateHardLinkW(dst.c_str(), src.c_str(), nullptr) || copy_file(src, dst, true)) {
+                        rec.files.push_back({dst, {}});
+                        mirrored++;
+                    } else {
+                        log(L"WARNING: could not mirror " + path_filename(src) + L" into bin\\");
+                    }
+                }
+                log(fmt(L"Mirrored %d files into bin\\ (engines resolve d3d9.dll from "
+                        L"different folders; hardlinks cost no extra space).", mirrored));
+            }
+        }
+
+        // 9) Record + index.
         record_save(rec);
         index_add(rec);
 
