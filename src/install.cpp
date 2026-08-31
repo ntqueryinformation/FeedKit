@@ -81,9 +81,10 @@ int run_capture(const std::wstring& exe, const std::wstring& args, std::wstring&
     return (int)code;
 }
 
-bool reshade_headless_install(const std::wstring& setup_exe, const std::wstring& target_exe, const LogFn& log) {
-    log(fmt(L"Running ReShade setup (unattended) for %s...", path_filename(target_exe).c_str()));
-    std::wstring args = fmt(L"--headless \"%s\" --api dxgi", target_exe.c_str());
+bool reshade_headless_install(const std::wstring& setup_exe, const std::wstring& target_exe,
+                              const std::wstring& api, const LogFn& log) {
+    log(fmt(L"Running ReShade setup (unattended) for %s [api %s]...", path_filename(target_exe).c_str(), api.c_str()));
+    std::wstring args = fmt(L"--headless \"%s\" --api %s", target_exe.c_str(), api.c_str());
     std::wstring output;
     int code = run_capture(setup_exe, args, output);
     for (const auto& line : split(output, L'\n')) {
@@ -205,6 +206,7 @@ struct Sink {
 
 bool reshade_present(const std::wstring& game_dir) {
     return file_exists(path_combine(game_dir, L"dxgi.dll")) ||
+           file_exists(path_combine(game_dir, L"opengl32.dll")) ||
            file_exists(path_combine(game_dir, L"ReShade.ini"));
 }
 
@@ -237,11 +239,14 @@ InstallResult run_install(const InstallOptions& opts, const LogFn& log, const Pr
                 fail(L"Cannot refresh over a broken previous install: " + un.message);
         }
 
-        // Existing non-ReShade dxgi.dll would be overwritten - refuse.
-        std::wstring dxgi = path_combine(game_dir, L"dxgi.dll");
+        // ReShade's proxy DLL name depends on the rendering API: OpenGL games
+        // get opengl32.dll, everything else dxgi.dll.
+        const std::wstring reshade_api = opts.opengl ? L"opengl" : L"dxgi";
+        const std::wstring reshade_dll_name = opts.opengl ? L"opengl32.dll" : L"dxgi.dll";
+        std::wstring dxgi = path_combine(game_dir, reshade_dll_name);
         if (file_exists(dxgi) && !file_exists(path_combine(game_dir, L"ReShade.ini")) &&
             !is_reshade_dll(dxgi))
-            fail(L"An existing dxgi.dll that is not ReShade was found in the game folder. "
+            fail(L"An existing " + reshade_dll_name + L" that is not ReShade was found in the game folder. "
                  L"Refusing to overwrite it - remove or rename it first.");
 
         rec.game_exe = game_exe;
@@ -278,7 +283,7 @@ InstallResult run_install(const InstallOptions& opts, const LogFn& log, const Pr
         const std::wstring game_ini = path_combine(game_dir, L"ReShade.ini");
         std::wstring reshade_dir = game_dir;
         if (need_reshade) {
-            if (!reshade_headless_install(reshade.setup_exe_path, game_exe, log))
+            if (!reshade_headless_install(reshade.setup_exe_path, game_exe, reshade_api, log))
                 fail(L"ReShade setup did not complete successfully. No files were changed except the download cache.");
             // Setup's per-game database can redirect the install (Source engine
             // games -> bin\ etc). The root ReShade.ini is then just an
@@ -373,10 +378,11 @@ InstallResult run_install(const InstallOptions& opts, const LogFn& log, const Pr
             std::wstring host_dir = path_combine(reshade_dir, L"host64");
             sink.place(feeder.host64_exe.local_path, path_combine(host_dir, L"dlss5-feed-host64.exe"));
 
-            std::wstring host_dxgi = path_combine(host_dir, L"dxgi.dll");
+            std::wstring host_dxgi = path_combine(host_dir, reshade_dll_name);
             if (!file_exists(host_dxgi)) {
                 if (!reshade_headless_install(reshade.setup_exe_path,
-                                              path_combine(host_dir, L"dlss5-feed-host64.exe"), log))
+                                              path_combine(host_dir, L"dlss5-feed-host64.exe"),
+                                              reshade_api, log))
                     fail(L"ReShade setup for the host64 helper did not complete.");
                 sink.record_new(host_dxgi);
                 sink.record_new(path_combine(host_dir, L"ReShade.ini"));

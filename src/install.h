@@ -14,6 +14,7 @@ struct InstallOptions {
     std::wstring game_exe;
     bool install_lumenite = true;      // recommended, on by default in the GUI
     bool d3d9_translate = false;       // D3D9 game: install dgVoodoo2 (D3D9 -> D3D11)
+    bool opengl = false;               // OpenGL game: ReShade installs as opengl32.dll
     bool install_vulkan_layer = false;
 };
 
