@@ -90,6 +90,7 @@
     <ClCompile Include="main.cpp"/>
     <ClCompile Include="gui.cpp"/>
     <ClCompile Include="util.cpp"/>
+    <ClCompile Include="ini_text.cpp"/>
     <ClCompile Include="json_lite.cpp"/>
     <ClCompile Include="http.cpp"/>
     <ClCompile Include="pe_bitness.cpp"/>
@@ -121,6 +122,7 @@
   <ItemGroup>
     <ClInclude Include="gui.h"/>
     <ClInclude Include="util.h"/>
+    <ClInclude Include="ini_text.h"/>
     <ClInclude Include="json_lite.h"/>
     <ClInclude Include="http.h"/>
     <ClInclude Include="pe_bitness.h"/>

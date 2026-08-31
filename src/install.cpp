@@ -1,5 +1,6 @@
 // FeedKit - install.cpp
 #include "install.h"
+#include "ini_text.h"
 #include "sources.h"
 #include "record.h"
 #include "pe_bitness.h"
@@ -95,14 +96,17 @@ bool reshade_headless_install(const std::wstring& setup_exe, const std::wstring&
     return true;
 }
 
-// --- ReShade.ini preprocessor definitions -------------------------------------
+// --- ReShade.ini editing -------------------------------------------------------
+// All edits go through fk::ini_*_exact text functions: ReShade's ini parser is
+// case-sensitive while the Windows profile APIs are not, so WritePrivateProfile-
+// String can silently edit the wrong key (e.g. PreProcessorDefinitions vs the
+// PreprocessorDefinitions ReShade actually reads).
 
 // Points DLSS5_Feed.fx's DLSS5_MV_PROVIDER at LumeniteFX Kernel (= 3) and
 // remembers the previous value so uninstall can put it back.
 void ensure_mv_provider_def(const std::wstring& ini_path, InstallRecord& rec, const LogFn& log) {
-    wchar_t buf[4096] = {};
-    GetPrivateProfileStringW(L"GENERAL", L"PreProcessorDefinitions", L"", buf, 4096, ini_path.c_str());
-    std::wstring orig = buf;
+    std::wstring orig;
+    ini_get_exact(ini_path, L"GENERAL", L"PreprocessorDefinitions", orig);
 
     std::wstring kept;
     for (const auto& tok : split(orig, L',')) {
@@ -117,11 +121,45 @@ void ensure_mv_provider_def(const std::wstring& ini_path, InstallRecord& rec, co
         log(L"ReShade.ini already points DLSS5_MV_PROVIDER at LumeniteFX Kernel.");
         return;
     }
-    if (!WritePrivateProfileStringW(L"GENERAL", L"PreProcessorDefinitions",
-                                    newval.c_str(), ini_path.c_str()))
-        fail(L"Cannot update PreProcessorDefinitions in " + ini_path);
-    rec.ini_touched.push_back({ini_path, L"GENERAL", L"PreProcessorDefinitions", orig});
+    if (!ini_set_exact(ini_path, L"GENERAL", L"PreprocessorDefinitions", newval))
+        fail(L"Cannot update PreprocessorDefinitions in " + ini_path);
+    rec.ini_touched.push_back({ini_path, L"GENERAL", L"PreprocessorDefinitions", orig});
     log(L"Set DLSS5_MV_PROVIDER=3 (LumeniteFX Kernel) in " + path_filename(ini_path));
+
+    // Remove the wrong-case key older FeedKit versions wrote (dead weight that
+    // ReShade's case-sensitive parser never read).
+    std::wstring wrong_case;
+    if (ini_get_exact(ini_path, L"GENERAL", L"PreProcessorDefinitions", wrong_case)) {
+        ini_set_exact(ini_path, L"GENERAL", L"PreProcessorDefinitions", L"");
+        log(L"Removed obsolete PreProcessorDefinitions key (wrong case) from " + path_filename(ini_path));
+    }
+}
+
+// ReShade Setup 6.8 writes search paths as "Shaders\**\**" (double glob), which
+// ReShade's own resolver cannot canonicalize (Win32 rejects wildcards -> error
+// 123) and skips the path entirely, so no effects are ever found. Collapse it
+// to the single trailing glob ReShade handles.
+void normalize_search_paths(const std::wstring& ini_path, InstallRecord& rec, const LogFn& log) {
+    if (!file_exists(ini_path))
+        return;
+    for (const wchar_t* key : {L"EffectSearchPaths", L"TextureSearchPaths"}) {
+        std::wstring orig;
+        if (!ini_get_exact(ini_path, L"GENERAL", key, orig) || orig.empty())
+            continue;
+        std::wstring fixed = orig;
+        size_t pos;
+        while ((pos = fixed.find(L"**\\**")) != std::wstring::npos)
+            fixed.replace(pos, 6, L"**");
+        while ((pos = fixed.find(L"**/**")) != std::wstring::npos)
+            fixed.replace(pos, 5, L"**");
+        if (fixed == orig)
+            continue;
+        if (!ini_set_exact(ini_path, L"GENERAL", key, fixed))
+            fail(std::wstring(L"Cannot update ") + key + L" in " + ini_path);
+        rec.ini_touched.push_back({ini_path, L"GENERAL", key, orig});
+        log(std::wstring(L"Fixed malformed search path (") + key + L") in " +
+            path_filename(ini_path) + L" - ReShade Setup 6.8 writes a glob ReShade cannot resolve");
+    }
 }
 
 // --- file placement with backup + record -------------------------------------
@@ -218,6 +256,7 @@ InstallResult run_install(const InstallOptions& opts, const LogFn& log, const Pr
         // 2) ReShade into the game folder.
         log(L"");
         log(L"== Installing ==");
+        const std::wstring game_ini = path_combine(game_dir, L"ReShade.ini");
         if (need_reshade) {
             if (!reshade_headless_install(reshade.setup_exe_path, game_exe, log))
                 fail(L"ReShade setup did not complete successfully. No files were changed except the download cache.");
@@ -225,8 +264,11 @@ InstallResult run_install(const InstallOptions& opts, const LogFn& log, const Pr
                 fail(L"ReShade setup reported success but dxgi.dll is missing.");
             rec.reshade_by_us = true;
             sink.record_new(dxgi);
-            sink.record_new(path_combine(game_dir, L"ReShade.ini"));
+            sink.record_new(game_ini);
         }
+        // Repair the search-path globs ReShade Setup 6.8 writes malformed
+        // (error 123, effects never found). No-op when already sane.
+        normalize_search_paths(game_ini, rec, log);
 
         // 3) Feeder add-on + shader.
         if (rec.is_32bit)
@@ -267,21 +309,22 @@ InstallResult run_install(const InstallOptions& opts, const LogFn& log, const Pr
                 std::wstring rel = src.substr(lumenite.staging_dir.size() + 1);
                 sink.place(src, path_combine(game_dir, rel));
             }
-            // Point DLSS5_Feed.fx at the LumeniteFX Kernel vectors.
-            std::wstring game_ini = path_combine(game_dir, L"ReShade.ini");
-            if (file_exists(game_ini))
-                ensure_mv_provider_def(game_ini, rec, log);
-            else
-                log(L"NOTE: no ReShade.ini yet - set DLSS5_MV_PROVIDER=3 in ReShade's "
-                    L"preprocessor definitions after the first game run.");
-            if (rec.is_32bit) {
-                std::wstring host_ini = path_combine(path_combine(game_dir, L"host64"), L"ReShade.ini");
-                if (file_exists(host_ini))
-                    ensure_mv_provider_def(host_ini, rec, log);
-            }
         } else {
             log(L"LumeniteFX skipped - install a motion-vector provider yourself and set "
                 L"DLSS5_MV_PROVIDER accordingly (Kernel = 3).");
+        }
+
+        // Point DLSS5_Feed.fx at the LumeniteFX Kernel vectors.
+        if (file_exists(game_ini))
+            ensure_mv_provider_def(game_ini, rec, log);
+        else if (opts.install_lumenite)
+            log(L"NOTE: no ReShade.ini yet - set DLSS5_MV_PROVIDER=3 in ReShade's "
+                L"preprocessor definitions after the first game run.");
+        if (rec.is_32bit) {
+            std::wstring host_ini = path_combine(path_combine(game_dir, L"host64"), L"ReShade.ini");
+            normalize_search_paths(host_ini, rec, log);
+            if (file_exists(host_ini))
+                ensure_mv_provider_def(host_ini, rec, log);
         }
 
         // 6) Optional Vulkan layer.
@@ -351,12 +394,12 @@ InstallResult run_uninstall(const std::wstring& game_dir, const LogFn& log) {
                 delete_file(path_combine(game_dir, extra));
         }
 
-        // Put back any ReShade.ini keys we changed (skip inis that are gone -
-        // WritePrivateProfileString would recreate the file otherwise).
+        // Put back any ReShade.ini keys we changed (exact-case text restore;
+        // skip inis that are gone - recreating them would be wrong).
         for (auto it = rec.ini_touched.rbegin(); it != rec.ini_touched.rend(); ++it) {
-            if (!file_exists(it->path)) continue;
-            const wchar_t* val = it->original.empty() ? nullptr : it->original.c_str();
-            WritePrivateProfileStringW(it->section.c_str(), it->key.c_str(), val, it->path.c_str());
+            if (!file_exists(it->path))
+                continue;
+            ini_set_exact(it->path, it->section, it->key, it->original);
             log(L"Restored " + it->key + L" in " + path_filename(it->path));
         }
 

@@ -10,6 +10,7 @@
     <ClCompile Include="main.cpp"><Filter>Source Files</Filter></ClCompile>
     <ClCompile Include="gui.cpp"><Filter>Source Files</Filter></ClCompile>
     <ClCompile Include="util.cpp"><Filter>Source Files</Filter></ClCompile>
+    <ClCompile Include="ini_text.cpp"><Filter>Source Files</Filter></ClCompile>
     <ClCompile Include="json_lite.cpp"><Filter>Source Files</Filter></ClCompile>
     <ClCompile Include="http.cpp"><Filter>Source Files</Filter></ClCompile>
     <ClCompile Include="pe_bitness.cpp"><Filter>Source Files</Filter></ClCompile>
@@ -27,6 +28,7 @@
   <ItemGroup>
     <ClInclude Include="gui.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="util.h"><Filter>Header Files</Filter></ClInclude>
+    <ClInclude Include="ini_text.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="json_lite.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="http.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="pe_bitness.h"><Filter>Header Files</Filter></ClInclude>
