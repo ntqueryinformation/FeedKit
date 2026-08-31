@@ -57,6 +57,16 @@ struct LumeniteBundle {
     bool ok = false;
 };
 
+// Standard ReShade headers (ReShade.fxh, ReShadeUI.fxh, DrawText.fxh). Setup's
+// headless mode skips the standard effects package that normally provides them,
+// so FeedKit fetches them from crosire/reshade-shaders itself.
+struct ReshadeHeaders {
+    std::wstring fxh_path;
+    std::wstring ui_fxh_path;
+    std::wstring drawtext_path;
+    bool ok = false;
+};
+
 // Temporary working directory for this session's downloads.
 std::wstring fetch_temp_dir();
 
@@ -80,6 +90,9 @@ ReshadeBundle fetch_reshade(const LogFn& log, const ProgressFn& progress);
 //   Shaders/**  -> staging\reshade-shaders\Shaders\**
 //   Textures/** -> staging\reshade-shaders\Textures\**
 LumeniteBundle fetch_lumenite(const LogFn& log, const ProgressFn& progress);
+
+// Standard ReShade shader headers from crosire/reshade-shaders (default branch).
+ReshadeHeaders fetch_reshade_headers(const LogFn& log, const ProgressFn& progress);
 
 // Extract files from a zip whose name matches any of `patterns` (simple wildcard
 // with *). Returns absolute paths of extracted files.

@@ -51,6 +51,7 @@ GameFolder\
 └─ reshade-shaders\
    ├─ Shaders\
    │  ├─ DLSS5_Feed.fx
+   │  ├─ ReShade.fxh, ReShadeUI.fxh, DrawText.fxh   (standard headers)
    │  ├─ lumenite_*.fx               (LumeniteFX)
    │  └─ include\lumenite_*.fxh      (LumeniteFX)
    └─ Textures\

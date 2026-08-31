@@ -249,6 +249,7 @@ InstallResult run_install(const InstallOptions& opts, const LogFn& log, const Pr
         FeederBundle feeder = fetch_feeder(log, progress);
         RenoDxBundle renodx = fetch_renodx_dlss5(log, progress);
         NgxBundle ngx = fetch_ngx_dlls(log, progress);
+        ReshadeHeaders reshade_headers = fetch_reshade_headers(log, progress);
         LumeniteBundle lumenite;
         if (opts.install_lumenite)
             lumenite = fetch_lumenite(log, progress);
@@ -280,6 +281,12 @@ InstallResult run_install(const InstallOptions& opts, const LogFn& log, const Pr
 
         std::wstring shaders_dir = path_combine(game_dir, L"reshade-shaders\\Shaders");
         sink.place(feeder.fx_shader.local_path, path_combine(shaders_dir, L"DLSS5_Feed.fx"));
+
+        // Standard headers: headless ReShade setup skips the effects package
+        // that normally provides them, so every .fx would fail to compile.
+        sink.place(reshade_headers.fxh_path, path_combine(shaders_dir, L"ReShade.fxh"));
+        sink.place(reshade_headers.ui_fxh_path, path_combine(shaders_dir, L"ReShadeUI.fxh"));
+        sink.place(reshade_headers.drawtext_path, path_combine(shaders_dir, L"DrawText.fxh"));
 
         // 4) RenoDX DLSS5 add-on + NGX DLLs.
         if (rec.is_32bit) {

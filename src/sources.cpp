@@ -383,4 +383,33 @@ LumeniteBundle fetch_lumenite(const LogFn& log, const ProgressFn& progress) {
     return out;
 }
 
+ReshadeHeaders fetch_reshade_headers(const LogFn& log, const ProgressFn& progress) {
+    ReshadeHeaders out;
+    log(L"Fetching standard ReShade shader headers (ReShade.fxh, ReShadeUI.fxh, DrawText.fxh)...");
+
+    // Resolve the default branch so renames don't break us.
+    std::wstring branch = L"slim";
+    HttpResponse meta = http_get(L"https://api.github.com/repos/crosire/reshade-shaders");
+    if (meta.ok) {
+        Json j;
+        if (Json::parse(meta.body, j)) {
+            std::wstring b = j.get_str(L"default_branch");
+            if (!b.empty()) branch = b;
+        }
+    }
+
+    std::wstring base = fmt(L"https://raw.githubusercontent.com/crosire/reshade-shaders/%s/Shaders/", branch.c_str());
+    out.fxh_path = path_combine(fetch_temp_dir(), L"ReShade.fxh");
+    out.ui_fxh_path = path_combine(fetch_temp_dir(), L"ReShadeUI.fxh");
+    out.drawtext_path = path_combine(fetch_temp_dir(), L"DrawText.fxh");
+    download(base + L"ReShade.fxh", out.fxh_path, progress);
+    download(base + L"ReShadeUI.fxh", out.ui_fxh_path, progress);
+    download(base + L"DrawText.fxh", out.drawtext_path, progress);
+
+    if (file_size(out.fxh_path) < 1000 || file_size(out.ui_fxh_path) < 1000)
+        fail(L"Downloaded ReShade headers look invalid (branch '" + branch + L"').");
+    out.ok = true;
+    return out;
+}
+
 } // namespace fk
