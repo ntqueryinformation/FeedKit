@@ -414,45 +414,45 @@ ReshadeHeaders fetch_reshade_headers(const LogFn& log, const ProgressFn& progres
 
 DgvoodooBundle fetch_dgvoodoo(const LogFn& log, const ProgressFn& progress) {
     DgvoodooBundle out;
-    log(L"Checking dege.freeweb.hu for the latest dgVoodoo2 release...");
+    log(L"Checking github.com/dege-diosg/dgVoodoo2 for the latest release...");
 
-    // Scrape the downloads page for dgVoodoo2_N_N.zip links (skip dbg/dev builds).
-    HttpResponse page = http_get(L"http://dege.freeweb.hu/dgVoodoo2/dgVoodoo2/index.html");
-    check_http_body(L"dgVoodoo2 downloads page", page);
-
-    struct Cand { std::wstring name; unsigned major, minor; };
-    std::vector<Cand> cands;
-    std::wstring html = to_wide(page.body);
-    size_t pos = 0;
-    while (true) {
-        pos = html.find(L"dgVoodoo2_", pos);
-        if (pos == std::wstring::npos)
-            break;
-        size_t end = html.find(L".zip", pos);
-        if (end == std::wstring::npos)
-            break;
-        std::wstring name = html.substr(pos, end + 4 - pos); // dgVoodoo2_N_N.zip
-        pos = end + 4;
-        std::wstring rest = name.substr(wcslen(L"dgVoodoo2_")); // N_N.zip
-        if (rest.find(L'_') == std::wstring::npos)
-            continue;
-        unsigned major = (unsigned)wcstoul(rest.c_str(), nullptr, 10);
-        unsigned minor = (unsigned)wcstoul(rest.c_str() + rest.find(L'_') + 1, nullptr, 10);
-        cands.push_back({name, major, minor});
+    std::wstring zip_name, zip_url;
+    HttpResponse r = http_get(L"https://api.github.com/repos/dege-diosg/dgVoodoo2/releases/latest");
+    if (r.ok) {
+        Json j;
+        if (Json::parse(r.body, j)) {
+            out.version = j.get_str(L"tag_name");
+            const Json* assets = j.find(L"assets");
+            if (assets && assets->is(Json::Type::Array)) {
+                for (const auto& a : assets->items) {
+                    std::wstring name = a.get_str(L"name");
+                    std::wstring lname = lower(name);
+                    if (starts_with(lname, L"dgvoodoo2_") && ends_with(lname, L".zip") &&
+                        lname.find(L"dbg") == std::wstring::npos &&
+                        lname.find(L"dev") == std::wstring::npos) {
+                        zip_name = name;
+                        zip_url = a.get_str(L"browser_download_url");
+                        break;
+                    }
+                }
+            }
+        }
     }
-    if (cands.empty())
-        fail(L"Could not find a dgVoodoo2 zip on the downloads page - the site layout may "
-             L"have changed. Download dgVoodoo2 manually from http://dege.freeweb.hu/dgVoodoo2/");
-    const Cand* best = &cands.front();
-    for (const auto& c : cands)
-        if (c.major > best->major || (c.major == best->major && c.minor > best->minor))
-            best = &c;
-    out.version = fmt(L"2.%u.%u", best->major, best->minor);
+    if (zip_url.empty()) {
+        // Release lookup unavailable - fall back to the stable "latest" URL
+        // with the asset naming observed upstream.
+        zip_name = L"dgVoodoo2_87_3.zip";
+        zip_url = L"https://github.com/dege-diosg/dgVoodoo2/releases/latest/download/" + zip_name;
+        log(L"Release lookup failed - falling back to the known-good asset name.");
+    }
+    if (starts_with(lower(out.version), L"v"))
+        out.version = out.version.substr(1);
+    if (out.version.empty())
+        out.version = zip_name;
     log(L"dgVoodoo2 latest release: " + out.version);
 
-    std::wstring url = L"http://dege.freeweb.hu/dgVoodoo2/bin/" + best->name;
-    std::wstring zip = path_combine(fetch_temp_dir(), best->name);
-    download(url, zip, progress);
+    std::wstring zip = path_combine(fetch_temp_dir(), zip_name);
+    download(zip_url, zip, progress);
 
     // Stage the pieces a D3D9 game needs, flat.
     auto stage = [&](const wchar_t* zip_entry, const wchar_t* dest_name) -> std::wstring {
