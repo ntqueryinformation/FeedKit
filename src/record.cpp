@@ -4,9 +4,36 @@
 #include "util.h"
 
 #include <algorithm>
+#include <cstring>
 #include <utility>
 
 namespace fk {
+
+namespace {
+
+// FeedKit <= 1.1.1 wrote these files as raw UTF-16LE (wide-string bytes) while
+// the reader assumed UTF-8, so no record could ever be loaded again. New
+// writes are UTF-8; reads accept both.
+std::string normalize_json_bytes(const std::string& data, bool& ok) {
+    ok = false;
+    if (data.empty())
+        return data;
+    if (data.size() % 2 == 0 && data[1] == '\0') {
+        std::wstring w(data.size() / 2, L'\0');
+        memcpy(w.data(), data.data(), data.size());
+        ok = true;
+        return to_utf8(w);
+    }
+    ok = true;
+    return data;
+}
+
+bool get_bool(const Json& j, const wchar_t* key) {
+    const Json* v = j.find(key);
+    return v && v->type == Json::Type::Bool ? v->boolean : false;
+}
+
+} // namespace
 
 static std::wstring json_escape(const std::wstring& s) {
     std::wstring out;
@@ -57,7 +84,8 @@ bool record_save(const InstallRecord& rec) {
         j += L"  ]\n";
     }
     j += L"}\n";
-    return write_file(rec.record_path(), j.c_str(), j.size() * sizeof(wchar_t));
+    const std::string out = to_utf8(j);
+    return write_file(rec.record_path(), out.c_str(), out.size());
 }
 
 static bool rec_from_json(const Json& j, InstallRecord& out) {
@@ -65,9 +93,9 @@ static bool rec_from_json(const Json& j, InstallRecord& out) {
     out.timestamp = j.get_str(L"timestamp");
     out.game_exe = j.get_str(L"game_exe");
     out.game_dir = j.get_str(L"game_dir");
-    out.is_32bit = j.get_str(L"is_32bit") == L"true";
-    out.reshade_by_us = j.get_str(L"reshade_by_us") == L"true";
-    out.vulkan_layer = j.get_str(L"vulkan_layer") == L"true";
+    out.is_32bit = get_bool(j, L"is_32bit");
+    out.reshade_by_us = get_bool(j, L"reshade_by_us");
+    out.vulkan_layer = get_bool(j, L"vulkan_layer");
     if (const Json* files = j.find(L"files"); files && files->is(Json::Type::Array)) {
         for (const auto& f : files->items) {
             RecordedFile rf;
@@ -93,6 +121,9 @@ bool record_load(const std::wstring& game_dir, InstallRecord& out) {
     std::wstring path = game_dir + L"\\feedkit.install.json";
     std::string data;
     if (!read_file(path, data)) return false;
+    bool enc_ok = false;
+    data = normalize_json_bytes(data, enc_ok);
+    if (!enc_ok) return false;
     Json j;
     if (!Json::parse(data, j)) return false;
     if (!rec_from_json(j, out)) return false;
@@ -111,6 +142,9 @@ std::vector<IndexEntry> index_load() {
     std::vector<IndexEntry> out;
     std::string data;
     if (!read_file(index_path(), data)) return out;
+    bool enc_ok = false;
+    data = normalize_json_bytes(data, enc_ok);
+    if (!enc_ok) return out;
     Json j;
     if (!Json::parse(data, j) || !j.is(Json::Type::Array)) return out;
     for (const auto& e : j.items) {
@@ -118,7 +152,7 @@ std::vector<IndexEntry> index_load() {
         ie.game_exe = e.get_str(L"game_exe");
         ie.game_dir = e.get_str(L"game_dir");
         ie.timestamp = e.get_str(L"timestamp");
-        ie.is_32bit = e.get_str(L"is_32bit") == L"true";
+        ie.is_32bit = get_bool(e, L"is_32bit");
         if (!ie.game_dir.empty()) out.push_back(std::move(ie));
     }
     return out;
@@ -150,7 +184,8 @@ bool index_add(const InstallRecord& rec) {
 
     std::wstring path = index_path();
     make_dirs(path_parent(path));
-    return write_file(path, j.c_str(), j.size() * sizeof(wchar_t));
+    const std::string out = to_utf8(j);
+    return write_file(path, out.c_str(), out.size());
 }
 
 bool index_remove(const std::wstring& game_dir) {
@@ -170,7 +205,8 @@ bool index_remove(const std::wstring& game_dir) {
     j += L"]\n";
     std::wstring path = index_path();
     make_dirs(path_parent(path));
-    return write_file(path, j.c_str(), j.size() * sizeof(wchar_t));
+    const std::string out = to_utf8(j);
+    return write_file(path, out.c_str(), out.size());
 }
 
 } // namespace fk

@@ -219,7 +219,9 @@ InstallResult run_install(const InstallOptions& opts, const LogFn& log, const Pr
         // Refresh path: remove a previous FeedKit install first.
         if (record_exists(game_dir)) {
             log(L"Previous FeedKit install found in this folder - removing it first...");
-            run_uninstall(game_dir, log);
+            InstallResult un = run_uninstall(game_dir, log);
+            if (!un.ok)
+                fail(L"Cannot refresh over a broken previous install: " + un.message);
         }
 
         // Existing non-ReShade dxgi.dll would be overwritten - refuse.

@@ -22,7 +22,7 @@ struct IniTouch {
 };
 
 struct InstallRecord {
-    std::wstring tool_version = L"1.1.1";
+    std::wstring tool_version = L"1.1.2";
     std::wstring timestamp;
     std::wstring game_exe;
     std::wstring game_dir;
