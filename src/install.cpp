@@ -258,7 +258,9 @@ InstallResult run_install(const InstallOptions& opts, const LogFn& log, const Pr
         log(L"== Downloading current files from upstream ==");
 
         ReshadeBundle reshade;
-        bool need_reshade = !reshade_present(game_dir);
+        // The mode's proxy DLL is what matters - a leftover ReShade.ini without
+        // it is a broken half-install that must not make us skip setup.
+        bool need_reshade = !file_exists(dxgi);
         if (need_reshade || rec.is_32bit) // 32-bit games also need ReShade for the host64 helper
             reshade = fetch_reshade(log, progress);
         if (!need_reshade)
@@ -283,6 +285,15 @@ InstallResult run_install(const InstallOptions& opts, const LogFn& log, const Pr
         const std::wstring game_ini = path_combine(game_dir, L"ReShade.ini");
         std::wstring reshade_dir = game_dir;
         if (need_reshade) {
+            // A previous half-install may have left a config without the dll;
+            // headless setup aborts on an existing installation, so move the
+            // stale config aside (kept as .stale-bak just in case).
+            if (file_exists(game_ini)) {
+                std::wstring stale = game_ini + L".stale-bak";
+                delete_file(stale);
+                if (MoveFileW(game_ini.c_str(), stale.c_str()))
+                    log(L"Moved stale ReShade.ini aside so setup can run cleanly.");
+            }
             if (!reshade_headless_install(reshade.setup_exe_path, game_exe, reshade_api, log))
                 fail(L"ReShade setup did not complete successfully. No files were changed except the download cache.");
             // Setup's per-game database can redirect the install (Source engine
