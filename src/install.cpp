@@ -264,7 +264,6 @@ InstallResult run_install(const InstallOptions& opts, const LogFn& log, const Pr
         log(L"== Installing ==");
         const std::wstring game_ini = path_combine(game_dir, L"ReShade.ini");
         std::wstring reshade_dir = game_dir;
-        bool redirected = false;
         if (need_reshade) {
             if (!reshade_headless_install(reshade.setup_exe_path, game_exe, log))
                 fail(L"ReShade setup did not complete successfully. No files were changed except the download cache.");
@@ -274,35 +273,21 @@ InstallResult run_install(const InstallOptions& opts, const LogFn& log, const Pr
             if (!file_exists(dxgi)) {
                 std::wstring base;
                 if (ini_get_exact(game_ini, L"INSTALL", L"BasePath", base) && !trim(base).empty()) {
-                    redirected = true;
                     reshade_dir = trim(base);
                     log(L"ReShade redirected this game's install to: " + reshade_dir);
                 }
             }
         } else if (!file_exists(dxgi)) {
             std::wstring base;
-            if (ini_get_exact(game_ini, L"INSTALL", L"BasePath", base) && !trim(base).empty()) {
-                redirected = true;
+            if (ini_get_exact(game_ini, L"INSTALL", L"BasePath", base) && !trim(base).empty())
                 reshade_dir = trim(base);
-            }
         }
 
-        if (opts.d3d9_translate) {
-            // dgVoodoo owns d3d9.dll, and its D3D11 output makes the loader
-            // resolve dxgi.dll from the application folder - so everything
-            // must sit beside the game exe. Undo any setup redirect.
-            if (redirected && file_exists(path_combine(reshade_dir, L"dxgi.dll"))) {
-                MoveFileExW(path_combine(reshade_dir, L"dxgi.dll").c_str(), dxgi.c_str(),
-                            MOVEFILE_REPLACE_EXISTING);
-                MoveFileExW(path_combine(reshade_dir, L"ReShade.ini").c_str(), game_ini.c_str(),
-                            MOVEFILE_REPLACE_EXISTING);
-                delete_file(path_combine(reshade_dir, L"ReShadePreset.ini"));
-                log(L"Moved ReShade from " + reshade_dir + L" to the game folder - with dgVoodoo, "
-                    L"d3d9.dll and dxgi.dll must sit beside the game exe.");
-            }
-            reshade_dir = game_dir;
-            redirected = false;
-        }
+        // D3D9 mode note: dgVoodoo owns d3d9.dll and its D3D11 output makes
+        // ReShade's dxgi.dll load from the SAME folder the engine resolves
+        // d3d9 from. For Source-style games that folder is the setup's
+        // redirect dir (bin\) - the engine's altered DLL search path looks
+        // there first - so we deliberately FOLLOW the redirect here.
 
         if (need_reshade) {
             if (!file_exists(path_combine(reshade_dir, L"dxgi.dll")))
