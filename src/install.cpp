@@ -9,6 +9,7 @@
 #include <windows.h>
 
 #include <stdexcept>
+#include <utility>
 
 #pragma comment(lib, "version.lib")
 
@@ -142,23 +143,35 @@ void ensure_mv_provider_def(const std::wstring& ini_path, InstallRecord& rec, co
 void normalize_search_paths(const std::wstring& ini_path, InstallRecord& rec, const LogFn& log) {
     if (!file_exists(ini_path))
         return;
-    for (const wchar_t* key : {L"EffectSearchPaths", L"TextureSearchPaths"}) {
+    const std::pair<const wchar_t*, const wchar_t*> keys[] = {
+        {L"EffectSearchPaths", L".\\reshade-shaders\\Shaders\\**"},
+        {L"TextureSearchPaths", L".\\reshade-shaders\\Textures\\**"},
+    };
+    for (const auto& k : keys) {
         std::wstring orig;
-        if (!ini_get_exact(ini_path, L"GENERAL", key, orig) || orig.empty())
-            continue;
-        std::wstring fixed = orig;
+        bool had = ini_get_exact(ini_path, L"GENERAL", k.first, orig);
+        if (had && trim(orig).empty())
+            had = false;
+
+        std::wstring fixed = had ? orig : std::wstring();
+        // Collapse malformed double globs ("Shaders\**\**" -> "Shaders\**").
         size_t pos;
         while ((pos = fixed.find(L"**\\**")) != std::wstring::npos)
             fixed.replace(pos, 6, L"**");
         while ((pos = fixed.find(L"**/**")) != std::wstring::npos)
             fixed.replace(pos, 5, L"**");
+
+        // The runtime default (".\") points nowhere useful - restore the
+        // upstream default path. A missing key is set as well.
+        if (fixed == L".\\" || fixed == L"./" || fixed == L"." || fixed.empty())
+            fixed = k.second;
+
         if (fixed == orig)
             continue;
-        if (!ini_set_exact(ini_path, L"GENERAL", key, fixed))
-            fail(std::wstring(L"Cannot update ") + key + L" in " + ini_path);
-        rec.ini_touched.push_back({ini_path, L"GENERAL", key, orig});
-        log(std::wstring(L"Fixed malformed search path (") + key + L") in " +
-            path_filename(ini_path) + L" - ReShade Setup 6.8 writes a glob ReShade cannot resolve");
+        if (!ini_set_exact(ini_path, L"GENERAL", k.first, fixed))
+            fail(std::wstring(L"Cannot update ") + k.first + L" in " + ini_path);
+        rec.ini_touched.push_back({ini_path, L"GENERAL", k.first, had ? trim(orig) : std::wstring()});
+        log(std::wstring(L"Fixed ") + k.first + L" in " + path_filename(ini_path) + L" -> " + fixed);
     }
 }
 
