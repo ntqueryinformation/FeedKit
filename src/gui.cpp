@@ -304,7 +304,7 @@ void draw_ui(AppState& s, AppActions& out) {
     ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 6 * sc);
     ImGui::PushStyleColor(ImGuiCol_Text, C_FAINT);
     ImGui::PushFont(F_REG(), 12.5f * sc);
-    ImGui::TextUnformatted("v1.2.0");
+    ImGui::TextUnformatted("v1.3.0");
     ImGui::PopFont();
     ImGui::PopStyleColor();
 
@@ -389,6 +389,20 @@ void draw_ui(AppState& s, AppActions& out) {
     ImGui::PushStyleColor(ImGuiCol_Text, C_DIM);
     ImGui::TextUnformatted("(translates D3D9 to D3D11 so the feed works)");
     ImGui::PopStyleColor();
+    ImGui::Checkbox("OpenGL game - install ReShade as opengl32.dll", &s.opengl);
+    ImGui::SameLine();
+    ImGui::PushStyleColor(ImGuiCol_Text, C_DIM);
+    ImGui::TextUnformatted("(mutually exclusive with D3D9)");
+    ImGui::PopStyleColor();
+
+    // The two modes are different install flavors - only one can be active.
+    static bool last_d3d9 = false, last_opengl = false;
+    if (s.d3d9 && s.opengl) {
+        if (s.d3d9 != last_d3d9) s.opengl = false;
+        else if (s.opengl != last_opengl) s.d3d9 = false;
+    }
+    last_d3d9 = s.d3d9;
+    last_opengl = s.opengl;
 
     ImGui::Dummy({0, 4 * sc});
     ImGui::PushStyleColor(ImGuiCol_Text, C_DIM);

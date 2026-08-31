@@ -2,7 +2,7 @@
 
 **One-click installer for [DLSS5-Feeder](https://github.com/jlrouzies-fr/DLSS5-Feeder).**
 
-FeedKit brings DLSS 5 neural rendering (DLAA) to games that ship without any DLSS - **D3D9, D3D10, D3D11, D3D12 and Vulkan** - without the usual manual file shuffle. Pick a game executable, click **Install**, and FeedKit downloads the current files from their official sources and puts everything where it belongs. Click **Uninstall** and it's all gone, with any replaced files restored from backup.
+FeedKit brings DLSS 5 neural rendering (DLAA) to games that ship without any DLSS - **D3D9, D3D11, D3D12, Vulkan and OpenGL** - without the usual manual file shuffle. Pick a game executable, click **Install**, and FeedKit downloads the current files from their official sources and puts everything where it belongs. Click **Uninstall** and it's all gone, with any replaced files restored from backup.
 
 > Native Windows app (Win32 C++ + Dear ImGui). No runtime dependencies - just download `FeedKit.exe` and run it.
 
@@ -14,14 +14,15 @@ FeedKit brings DLSS 5 neural rendering (DLAA) to games that ship without any DLS
 
 - Windows 10 / 11 (x64)
 - An NVIDIA RTX GPU supported by DLSS 5 neural rendering
-- A game rendering through **Direct3D 9, 10, 11, 12 or Vulkan** - 64-bit or 32-bit
+- A game rendering through **Direct3D 9, 11, 12, Vulkan or OpenGL** - 64-bit or 32-bit
 - Internet access (FeedKit downloads everything at install time)
 
 ### Rendering APIs
 
 | API | Support |
 |---|---|
-| **D3D10 / D3D11 / D3D12** | Fully automated. ReShade installs as `dxgi.dll`, which covers the whole DXGI family; bitness (32/64-bit) is auto-detected. |
+| **D3D11 / D3D12** | Fully automated. ReShade installs as `dxgi.dll`, which covers the whole DXGI family; bitness (32/64-bit) is auto-detected. |
+| **OpenGL** | Fully automated. ReShade installs as `opengl32.dll`. The game must run on the NVIDIA GPU (OpenGL interop requires it) - on hybrid graphics force it via Windows Settings > Display > Graphics. |
 | **Vulkan** | Supported by DLSS5-Feeder itself - tick the **Vulkan layer** option in FeedKit. If a game misses the required Vulkan interop extensions, launch it through the `run-with-feed-layer.bat` fallback that the layer installs (upstream guidance). |
 | **D3D9** | Fully automated via the **D3D9 game** option - FeedKit installs [dgVoodoo2](https://github.com/dege-diosg/dgVoodoo2) (D3D9 -> D3D11 translation), configures it for DLSS5-Feeder, and on first launch you should see the dgVoodoo watermark confirming the translation is active. |
 
@@ -38,7 +39,7 @@ Nothing is bundled with FeedKit. **Every install fetches the current versions fr
 
 | Component | Source | Files |
 |---|---|---|
-| ReShade (add-on support) | [reshade.me](https://reshade.me) | `dxgi.dll` (covers D3D10/11/12), installed unattended by ReShade's own setup |
+| ReShade (add-on support) | [reshade.me](https://reshade.me) | `dxgi.dll` (D3D11/12) or `opengl32.dll` (OpenGL), installed unattended by ReShade's own setup |
 | DLSS5-Feeder | latest GitHub release of [DLSS5-Feeder](https://github.com/jlrouzies-fr/DLSS5-Feeder) | `dlss5-feed.addon64` / `dlss5-feed.addon32`, `DLSS5_Feed.fx` |
 | RenoDX DLSS5 add-on | newest release in [RankFTW/rhi-repo](https://github.com/RankFTW/rhi-repo/releases) | `renodx-dlss5.addon64` |
 | DLSS DLLs | DLSS versions published via [RHI's](https://github.com/RankFTW/RHI) `dlss_manifest.json` | `nvngx_dlssnr.dll` (ShortFuse build), `nvngx_dlss.dll` |
