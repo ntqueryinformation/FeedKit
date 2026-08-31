@@ -1,187 +1,135 @@
 // FeedKit - main.cpp
-// FeedKit: one-click installer/uninstaller for DLSS5-Feeder game setups.
-// Native Win32, no external UI dependencies.
+// Host application: Win32 window + DirectX 11 + Dear ImGui front end.
 
 #include <windows.h>
-#include <commctrl.h>
-#include <commdlg.h>
 #include <shellapi.h>
+#include <commdlg.h>
+#include <dwmapi.h>
+
+#include <d3d11.h>
+#include <dxgi.h>
+
+#include "imgui.h"
+#include "backends/imgui_impl_win32.h"
+#include "backends/imgui_impl_dx11.h"
 
 #include <thread>
-#include <memory>
 
+#include "gui.h"
 #include "install.h"
 #include "pe_bitness.h"
 #include "record.h"
 #include "sources.h"
 #include "util.h"
 
-#pragma comment(lib, "comctl32.lib")
-#pragma comment(lib, "user32.lib")
-#pragma comment(lib, "gdi32.lib")
+#pragma comment(lib, "d3d11.lib")
+#pragma comment(lib, "dxgi.lib")
+#pragma comment(lib, "dwmapi.lib")
 #pragma comment(lib, "ole32.lib")
+#pragma comment(lib, "shell32.lib")
+#pragma comment(lib, "comdlg32.lib")
+
+using fk::lower;
+using fk::to_utf8;
+
+// Must be declared at global scope to match the backend's exported symbol.
+extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
 namespace {
 
-// Control IDs
-enum {
-    IDC_EXE_EDIT = 101,
-    IDC_BROWSE,
-    IDC_INSTALL,
-    IDC_UNINSTALL,
-    IDC_OPENFOLDER,
-    IDC_VULKAN,
-    IDC_LOG,
-    IDC_PROGRESS,
-    IDC_BITNESS,
-    IDC_PREV,
-    IDC_OPENLOG,
-    IDC_NEXTSTEPS,
-    IDC_LUMENITE,
-};
+// --- D3D rendering state (standard ImGui win32/dx11 boilerplate) ---
+ID3D11Device* g_device = nullptr;
+ID3D11DeviceContext* g_context = nullptr;
+IDXGISwapChain* g_swapchain = nullptr;
+ID3D11RenderTargetView* g_rtv = nullptr;
 
-// Worker -> UI messages
-enum {
-    WM_APP_LOG = WM_APP + 1,      // wParam: heap wchar_t* (freed by UI)
-    WM_APP_DONE,                  // wParam: ok, lParam: heap wchar_t* (freed by UI)
-};
+bool create_device_d3d(HWND hwnd) {
+    DXGI_SWAP_CHAIN_DESC sd{};
+    sd.BufferDesc.RefreshRate.Numerator = 60;
+    sd.BufferDesc.RefreshRate.Denominator = 1;
+    sd.BufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    sd.BufferDesc.Width = 0;
+    sd.BufferDesc.Height = 0;
+    sd.SampleDesc.Count = 1;
+    sd.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+    sd.BufferCount = 2;
+    sd.OutputWindow = hwnd;
+    sd.Windowed = TRUE;
+    sd.SwapEffect = DXGI_SWAP_EFFECT_DISCARD;
+    sd.Flags = 0;
 
+    UINT flags = 0;
+#ifdef _DEBUG
+    flags |= D3D11_CREATE_DEVICE_DEBUG;
+#endif
+    D3D_FEATURE_LEVEL fl;
+    HRESULT hr = D3D11CreateDeviceAndSwapChain(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, flags,
+                                               nullptr, 0, D3D11_SDK_VERSION, &sd, &g_swapchain,
+                                               &g_device, &fl, &g_context);
+    if (FAILED(hr))
+        return false;
+    ID3D11Texture2D* back = nullptr;
+    g_swapchain->GetBuffer(0, IID_PPV_ARGS(&back));
+    if (!back) return false;
+    g_device->CreateRenderTargetView(back, nullptr, &g_rtv);
+    back->Release();
+    return g_rtv != nullptr;
+}
+
+void cleanup_device_d3d() {
+    if (g_rtv) { g_rtv->Release(); g_rtv = nullptr; }
+    if (g_swapchain) { g_swapchain->Release(); g_swapchain = nullptr; }
+    if (g_context) { g_context->Release(); g_context = nullptr; }
+    if (g_device) { g_device->Release(); g_device = nullptr; }
+}
+
+// --- App state ---
 constexpr wchar_t kWindowClass[] = L"FeedKitMainWindow";
 constexpr wchar_t kWindowTitle[] = L"FeedKit - DLSS5-Feeder installer";
 
-HWND g_exe_edit, g_browse, g_install, g_uninstall, g_openfolder, g_vulkan, g_lumenite;
-HWND g_log, g_progress, g_bitness, g_prev, g_openlog, g_nextsteps;
-HFONT g_ui_font, g_mono_font;
-bool g_busy = false;
+ui::AppState g_state;
+std::wstring g_last_computed_path;
 
-// ---------------------------------------------------------------------------
-// Layout helpers (96 DPI design coordinates, scaled to the window's DPI)
+// --- Log plumbing ---
 
-int g_dpi = 96;
-int S(int v) { return MulDiv(v, g_dpi, 96); }
-
-HWND make_control(HWND parent, const wchar_t* cls, const wchar_t* text, DWORD style,
-                  int x, int y, int w, int h, int id) {
-    HWND c = CreateWindowExW(0, cls, text, WS_CHILD | WS_VISIBLE | style, S(x), S(y), S(w), S(h),
-                             parent, (HMENU)(INT_PTR)id, nullptr, nullptr);
-    SendMessageW(c, WM_SETFONT, (WPARAM)g_ui_font, TRUE);
-    return c;
-}
-
-// ---------------------------------------------------------------------------
-// UI state helpers
-
-std::wstring current_exe() {
-    int len = GetWindowTextLengthW(g_exe_edit);
-    std::wstring s(len, L'\0');
-    GetWindowTextW(g_exe_edit, s.data(), len + 1);
-    return s;
-}
-
-void update_bitness_label() {
-    std::wstring exe = current_exe();
-    if (exe.empty() || !fk::file_exists(exe)) {
-        SetWindowTextW(g_bitness, L"");
-        return;
-    }
-    fk::PeArch arch = fk::pe_arch(exe);
-    std::wstring text = fk::fmt(L"Detected: %s", fk::pe_arch_name(arch));
-    if (arch == fk::PeArch::X64 || arch == fk::PeArch::X86) {
-        std::wstring dir = fk::path_parent(exe);
-        if (fk::record_exists(dir))
-            text += L"   |   FeedKit already installed here";
-    }
-    SetWindowTextW(g_bitness, text.c_str());
-}
-
-void update_buttons() {
-    std::wstring exe = current_exe();
-    bool valid = !exe.empty() && fk::file_exists(exe);
-    EnableWindow(g_install, valid && !g_busy);
-    EnableWindow(g_uninstall, valid && !g_busy && fk::record_exists(fk::path_parent(exe)));
-    EnableWindow(g_openfolder, valid && !g_busy);
-    EnableWindow(g_browse, !g_busy);
-    EnableWindow(g_vulkan, !g_busy);
-    EnableWindow(g_lumenite, !g_busy);
-}
-
-void refresh_prev_installs() {
-    if (auto* old = (std::vector<std::wstring>*)GetPropW(g_prev, L"dirs")) {
-        RemovePropW(g_prev, L"dirs");
-        delete old;
-    }
-    SendMessageW(g_prev, CB_RESETCONTENT, 0, 0);
-    auto entries = fk::index_load();
-    auto* stored = new std::vector<std::wstring>();
-    for (const auto& e : entries) {
-        std::wstring display = e.game_dir + L"   [" + e.timestamp + L"]";
-        SendMessageW(g_prev, CB_ADDSTRING, 0, (LPARAM)display.c_str());
-        stored->push_back(e.game_dir);
-    }
-    SetPropW(g_prev, L"dirs", (HANDLE)stored);
-}
-
-void on_prev_selected() {
-    auto* stored = (std::vector<std::wstring>*)GetPropW(g_prev, L"dirs");
-    if (!stored) return;
-    int sel = (int)SendMessageW(g_prev, CB_GETCURSEL, 0, 0);
-    if (sel < 0 || sel >= (int)stored->size()) return;
-    std::wstring dir = (*stored)[sel];
-    // Find an exe inside: prefer recorded game_exe from the record file.
-    fk::InstallRecord rec;
-    std::wstring exe;
-    if (fk::record_load(dir, rec) && fk::file_exists(rec.game_exe))
-        exe = rec.game_exe;
-    if (exe.empty()) {
-        // Fall back: any exe in the folder.
-        WIN32_FIND_DATAW fd;
-        HANDLE h = FindFirstFileW((dir + L"\\*.exe").c_str(), &fd);
-        if (h != INVALID_HANDLE_VALUE) {
-            exe = fk::path_combine(dir, fd.cFileName);
-            FindClose(h);
-        }
-    }
-    if (!exe.empty()) {
-        SetWindowTextW(g_exe_edit, exe.c_str());
-        update_bitness_label();
-        update_buttons();
-    }
+uint32_t classify_log(const std::wstring& t) {
+    auto has = [&](const wchar_t* needle) { return lower(t).find(lower(needle)) != std::wstring::npos; };
+    if (has(L"failed"))
+        return IM_COL32(248, 81, 73, 255);
+    if (has(L"install complete") || has(L"uninstall complete") || has(L"restored ") ||
+        has(L"install complete."))
+        return IM_COL32(63, 185, 80, 255);
+    if (has(L"warning") || has(L"note:") || has(L"skipped"))
+        return IM_COL32(214, 158, 46, 255);
+    if (t.rfind(L"----", 0) == 0)
+        return IM_COL32(93, 158, 245, 255);
+    if (t.rfind(L"  ", 0) == 0)
+        return IM_COL32(139, 148, 158, 255);
+    return IM_COL32(201, 209, 217, 255);
 }
 
 void log_line(const std::wstring& s) {
-    std::wstring line = L"[" + fk::timestamp_now() + L"]  " + s;
-    int idx = (int)SendMessageW(g_log, LB_ADDSTRING, 0, (LPARAM)line.c_str());
-    SendMessageW(g_log, LB_SETTOPINDEX, idx, 0);
-    while ((int)SendMessageW(g_log, LB_GETCOUNT, 0, 0) > 2000) {
-        SendMessageW(g_log, LB_DELETESTRING, 0, 0);
-    }
+    // "HH:MM:SS" timestamp
+    SYSTEMTIME st;
+    GetLocalTime(&st);
+    wchar_t ts[16];
+    swprintf_s(ts, L"%02u:%02u:%02u", st.wHour, st.wMinute, st.wSecond);
+    std::lock_guard<std::mutex> lk(g_state.mtx);
+    g_state.log.push_back({to_utf8(ts), to_utf8(s), classify_log(s)});
+    if (g_state.log.size() > 4000)
+        g_state.log.erase(g_state.log.begin(), g_state.log.begin() + 1000);
 }
 
-void set_busy(bool busy) {
-    g_busy = busy;
-    SendMessageW(g_progress, PBM_SETMARQUEE, busy ? 1 : 0, 25);
-    update_buttons();
-    if (busy) SetWindowTextW(g_bitness, L"Working - see the log below...");
-    else update_bitness_label();
-}
-
-// ---------------------------------------------------------------------------
-// Worker thread
+// --- Worker thread ---
 
 struct Job {
     bool uninstall = false;
     fk::InstallOptions opts;
 };
 
-void run_job(HWND hwnd, std::shared_ptr<Job> job) {
-    fk::LogFn log = [hwnd](const std::wstring& line) {
-        wchar_t* copy = new wchar_t[line.size() + 1];
-        wcscpy_s(copy, line.size() + 1, line.c_str());
-        PostMessageW(hwnd, WM_APP_LOG, (WPARAM)copy, 0);
-    };
-    fk::ProgressFn progress = [](uint64_t, uint64_t) {
-        // Per-file progress is logged by the pipeline; the bar stays in marquee mode.
-    };
+void run_job(std::shared_ptr<Job> job) {
+    fk::LogFn log = [](const std::wstring& line) { log_line(line); };
+    fk::ProgressFn progress = [](uint64_t, uint64_t) {};
 
     fk::InstallResult res;
     if (job->uninstall)
@@ -189,13 +137,137 @@ void run_job(HWND hwnd, std::shared_ptr<Job> job) {
     else
         res = fk::run_install(job->opts, log, progress);
 
-    wchar_t* msg = new wchar_t[res.message.size() + 1];
-    wcscpy_s(msg, res.message.size() + 1, res.message.c_str());
-    PostMessageW(hwnd, WM_APP_DONE, res.ok ? 1 : 0, (LPARAM)msg);
+    std::lock_guard<std::mutex> lk(g_state.mtx);
+    g_state.busy = false;
+    g_state.has_done = true;
+    g_state.done_ok = res.ok;
+    g_state.done_msg = to_utf8(res.message);
+    // Refresh "installed here" marker after the job touched the folder.
+    g_state.installed_here = fk::record_exists(fk::path_parent(job->opts.game_exe));
 }
 
-// ---------------------------------------------------------------------------
-// Actions
+void start_job(bool uninstall, const fk::InstallOptions& opts) {
+    auto job = std::make_shared<Job>();
+    job->uninstall = uninstall;
+    job->opts = opts;
+    {
+        std::lock_guard<std::mutex> lk(g_state.mtx);
+        g_state.busy = true;
+    }
+    log_line(uninstall ? L"---- Starting uninstall ----" : L"---- Starting install ----");
+    std::thread(run_job, job).detach();
+}
+
+// --- State helpers (UI thread) ---
+
+void refresh_selection() {
+    std::wstring exe;
+    {
+        std::lock_guard<std::mutex> lk(g_state.mtx);
+        exe = g_state.exe_path;
+        if (exe == g_last_computed_path) return;
+        g_last_computed_path = exe;
+    }
+    ui::Arch arch = ui::Arch::Unknown;
+    bool installed = false;
+    if (!exe.empty() && fk::file_exists(exe)) {
+        switch (fk::pe_arch(exe)) {
+        case fk::PeArch::X86:   arch = ui::Arch::X86; break;
+        case fk::PeArch::X64:   arch = ui::Arch::X64; break;
+        case fk::PeArch::Arm64: arch = ui::Arch::Arm64; break;
+        default:                arch = ui::Arch::Unknown; break;
+        }
+        installed = fk::record_exists(fk::path_parent(exe));
+    }
+    std::lock_guard<std::mutex> lk(g_state.mtx);
+    g_state.arch = arch;
+    g_state.installed_here = installed;
+}
+
+void refresh_prev_installs() {
+    auto entries = fk::index_load();
+    std::lock_guard<std::mutex> lk(g_state.mtx);
+    g_state.prev_dirs.clear();
+    for (const auto& e : entries) g_state.prev_dirs.push_back(e.game_dir);
+    g_state.prev_sel = -1;
+}
+
+void set_exe_path(const std::wstring& path) {
+    {
+        std::lock_guard<std::mutex> lk(g_state.mtx);
+        g_state.exe_path = path;
+    }
+    refresh_selection();
+}
+
+// --- WndProc ---
+
+LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+    if (ImGui_ImplWin32_WndProcHandler(hwnd, msg, wp, lp))
+        return 1;
+
+    switch (msg) {
+    case WM_SIZE: {
+        if (g_device && wp != SIZE_MINIMIZED) {
+            if (g_rtv) { g_rtv->Release(); g_rtv = nullptr; }
+            g_swapchain->ResizeBuffers(0, LOWORD(lp), HIWORD(lp), DXGI_FORMAT_UNKNOWN, 0);
+            ID3D11Texture2D* back = nullptr;
+            g_swapchain->GetBuffer(0, IID_PPV_ARGS(&back));
+            if (back) {
+                g_device->CreateRenderTargetView(back, nullptr, &g_rtv);
+                back->Release();
+            }
+        }
+        return 0;
+    }
+    case WM_DROPFILES: {
+        HDROP drop = (HDROP)wp;
+        wchar_t buf[MAX_PATH];
+        if (DragQueryFileW(drop, 0, buf, MAX_PATH)) {
+            std::wstring path = buf;
+            if (fk::path_extension(path) != L".exe" && fk::dir_exists(path)) {
+                WIN32_FIND_DATAW fd;
+                HANDLE h = FindFirstFileW((path + L"\\*.exe").c_str(), &fd);
+                if (h != INVALID_HANDLE_VALUE) {
+                    path = fk::path_combine(path, fd.cFileName);
+                    FindClose(h);
+                }
+            }
+            if (fk::path_extension(path) == L".exe")
+                set_exe_path(path);
+        }
+        DragFinish(drop);
+        return 0;
+    }
+    case WM_GETMINMAXINFO: {
+        auto* mmi = (MINMAXINFO*)lp;
+        UINT wdpi = GetDpiForWindow(hwnd);
+        float s = wdpi / 96.0f;
+        mmi->ptMinTrackSize = {LONG(760 * s), LONG(640 * s)};
+        return 0;
+    }
+    case WM_DPICHANGED: {
+        float scale = HIWORD(wp) / 96.0f;
+        ui::set_font_scale(scale);
+        const RECT* r = (RECT*)lp;
+        SetWindowPos(hwnd, nullptr, r->left, r->top, r->right - r->left, r->bottom - r->top,
+                     SWP_NOZORDER | SWP_NOACTIVATE);
+        return 0;
+    }
+    case WM_DESTROY:
+        PostQuitMessage(0);
+        return 0;
+    }
+    return DefWindowProcW(hwnd, msg, wp, lp);
+}
+
+void enable_dark_titlebar(HWND hwnd) {
+    BOOL dark = TRUE;
+    if (FAILED(DwmSetWindowAttribute(hwnd, 20 /*DWMWA_USE_IMMERSIVE_DARK_MODE*/, &dark, sizeof(dark))))
+        DwmSetWindowAttribute(hwnd, 19, &dark, sizeof(dark));
+}
+
+// --- Actions ---
 
 void browse_for_exe(HWND hwnd) {
     wchar_t buf[MAX_PATH] = {};
@@ -207,219 +279,85 @@ void browse_for_exe(HWND hwnd) {
     ofn.nMaxFile = MAX_PATH;
     ofn.lpstrTitle = L"Select the game executable";
     ofn.Flags = OFN_FILEMUSTEXIST | OFN_HIDEREADONLY;
-    if (GetOpenFileNameW(&ofn)) {
-        SetWindowTextW(g_exe_edit, buf);
-        update_bitness_label();
-        update_buttons();
+    if (GetOpenFileNameW(&ofn))
+        set_exe_path(buf);
+}
+
+void consume_actions(HWND hwnd, const ui::AppActions& a) {
+    if (a.browse)
+        browse_for_exe(hwnd);
+
+    if (a.clear_log) {
+        std::lock_guard<std::mutex> lk(g_state.mtx);
+        g_state.log.clear();
     }
-}
-
-void start_install(HWND hwnd) {
-    Job job;
-    job.opts.game_exe = current_exe();
-    job.opts.install_lumenite = SendMessageW(g_lumenite, BM_GETCHECK, 0, 0) == BST_CHECKED;
-    job.opts.install_vulkan_layer = SendMessageW(g_vulkan, BM_GETCHECK, 0, 0) == BST_CHECKED;
-    auto* shared = new std::shared_ptr<Job>(std::make_shared<Job>(job));
-    set_busy(true);
-    log_line(L"---- Starting install ----");
-    std::thread([hwnd, shared] { run_job(hwnd, *shared); delete shared; }).detach();
-}
-
-void start_uninstall(HWND hwnd) {
-    Job job;
-    job.uninstall = true;
-    job.opts.game_exe = current_exe();
-    auto* shared = new std::shared_ptr<Job>(std::make_shared<Job>(job));
-    set_busy(true);
-    log_line(L"---- Starting uninstall ----");
-    std::thread([hwnd, shared] { run_job(hwnd, *shared); delete shared; }).detach();
-}
-
-// ---------------------------------------------------------------------------
-
-void on_done(HWND hwnd, bool ok, const wchar_t* msg) {
-    set_busy(false);
-    log_line(ok ? L"---- Done ----" : L"---- Finished with errors ----");
-    update_bitness_label();
-    update_buttons();
-    refresh_prev_installs();
-    MessageBoxW(hwnd, msg, L"FeedKit", MB_OK | (ok ? MB_ICONINFORMATION : MB_ICONWARNING));
-}
-
-LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
-    switch (msg) {
-    case WM_CREATE: {
-        g_dpi = GetDpiForWindow(hwnd);
-
-        g_ui_font = CreateFontW(S(-16), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
-                                DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-                                CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
-        g_mono_font = CreateFontW(S(-15), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
-                                  DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-                                  CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Consolas");
-
-        make_control(hwnd, L"STATIC", L"Game executable:", SS_LEFT, 12, 12, 200, 20, -1);
-        g_exe_edit = make_control(hwnd, L"EDIT", L"", WS_BORDER | ES_AUTOHSCROLL | ES_READONLY,
-                                  12, 34, 596, 26, IDC_EXE_EDIT);
-        g_browse = make_control(hwnd, L"BUTTON", L"Browse...", BS_PUSHBUTTON, 618, 33, 96, 27, IDC_BROWSE);
-        g_bitness = make_control(hwnd, L"STATIC", L"", SS_LEFT, 14, 66, 680, 20, IDC_BITNESS);
-
-        g_lumenite = make_control(hwnd, L"BUTTON",
-                                  L"Install LumeniteFX motion-vector provider (recommended)",
-                                  BS_AUTOCHECKBOX, 12, 88, 560, 22, IDC_LUMENITE);
-        SendMessageW(g_lumenite, BM_SETCHECK, BST_CHECKED, 0);
-        g_vulkan = make_control(hwnd, L"BUTTON",
-                                L"Also install the Vulkan layer (fallback for Vulkan games)",
-                                BS_AUTOCHECKBOX, 12, 112, 560, 22, IDC_VULKAN);
-
-        make_control(hwnd, L"STATIC", L"Previous installs:", SS_LEFT, 12, 142, 200, 20, -1);
-        g_prev = make_control(hwnd, L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_VSCROLL,
-                              12, 162, 702, 200, IDC_PREV);
-
-        g_install = make_control(hwnd, L"BUTTON", L"Install", BS_PUSHBUTTON, 12, 196, 130, 34, IDC_INSTALL);
-        g_uninstall = make_control(hwnd, L"BUTTON", L"Uninstall", BS_PUSHBUTTON, 150, 196, 130, 34, IDC_UNINSTALL);
-        g_openfolder = make_control(hwnd, L"BUTTON", L"Open game folder", BS_PUSHBUTTON, 288, 196, 150, 34, IDC_OPENFOLDER);
-
-        make_control(hwnd, L"STATIC",
-                     L"Upstream sources are fetched fresh on every install: reshade.me, "
-                     L"github.com/jlrouzies-fr/DLSS5-Feeder, RankFTW/RHI, LumeniteFX.",
-                     SS_LEFT, 14, 238, 700, 34, -1);
-
-        // Log pane
-        make_control(hwnd, L"BUTTON", L"Log", BS_GROUPBOX, 12, 274, 702, 260, -1);
-        g_log = CreateWindowExW(WS_EX_CLIENTEDGE, L"LISTBOX", L"",
-                                WS_CHILD | WS_VISIBLE | WS_VSCROLL | LBS_NOINTEGRALHEIGHT | LBS_NOTIFY,
-                                S(20), S(294), S(686), S(232), hwnd, (HMENU)(INT_PTR)IDC_LOG, nullptr, nullptr);
-        SendMessageW(g_log, WM_SETFONT, (WPARAM)g_mono_font, TRUE);
-
-        g_progress = CreateWindowExW(0, PROGRESS_CLASSW, L"", WS_CHILD | WS_VISIBLE | PBS_MARQUEE,
-                                     S(12), S(542), S(566), S(22), hwnd, (HMENU)(INT_PTR)IDC_PROGRESS, nullptr, nullptr);
-        SendMessageW(g_progress, PBM_SETMARQUEE, 0, 25);
-        g_openlog = make_control(hwnd, L"BUTTON", L"Open downloads folder", BS_PUSHBUTTON,
-                                 586, 539, 128, 28, IDC_OPENLOG);
-
-        // Next steps
-        g_nextsteps = make_control(
-            hwnd, L"STATIC",
-            L"After installing:  open the ReShade overlay (Home key), enable the LUMEN technique, then "
-            L"DLSS 5 Feed, then the neural rendering technique; keep MSAA/SSAA off.  "
-            L"Verify via dlss5-feed.log in the game folder.  "
-            L"(With LumeniteFX installed, DLSS5_MV_PROVIDER=3 is set for you - if you skipped it, "
-            L"install a motion-vector provider and set DLSS5_MV_PROVIDER yourself.)",
-            SS_LEFT, 12, 572, 702, 64, IDC_NEXTSTEPS);
-
-        DragAcceptFiles(hwnd, TRUE);
-        refresh_prev_installs();
-        update_buttons();
-        return 0;
-    }
-
-    case WM_COMMAND: {
-        int id = LOWORD(wp);
-        int code = HIWORD(wp);
-        switch (id) {
-        case IDC_BROWSE:
-            if (code == BN_CLICKED) browse_for_exe(hwnd);
-            break;
-        case IDC_INSTALL:
-            if (code == BN_CLICKED) start_install(hwnd);
-            break;
-        case IDC_UNINSTALL:
-            if (code == BN_CLICKED && MessageBoxW(hwnd,
-                    L"Remove the FeedKit / DLSS5-Feeder files from this game folder?\n\n"
-                    L"Files FeedKit replaced will be restored from their backups.",
-                    kWindowTitle, MB_YESNO | MB_ICONQUESTION) == IDYES)
-                start_uninstall(hwnd);
-            break;
-        case IDC_OPENFOLDER:
-            if (code == BN_CLICKED) fk::open_folder(fk::path_parent(current_exe()));
-            break;
-        case IDC_OPENLOG:
-            if (code == BN_CLICKED) fk::open_folder(fk::fetch_temp_dir());
-            break;
-        case IDC_EXE_EDIT:
-            if (code == EN_CHANGE) {
-                update_bitness_label();
-                update_buttons();
-            }
-            break;
-        case IDC_PREV:
-            if (code == CBN_SELCHANGE) on_prev_selected();
-            break;
+    if (a.open_downloads)
+        fk::open_folder(fk::fetch_temp_dir());
+    if (a.open_folder && !g_state.exe_path.empty())
+        fk::open_folder(fk::path_parent(g_state.exe_path));
+    if (!a.open_url.empty())
+        fk::open_url(a.open_url);
+    if (a.pick_prev >= 0) {
+        std::wstring dir;
+        {
+            std::lock_guard<std::mutex> lk(g_state.mtx);
+            if (a.pick_prev < (int)g_state.prev_dirs.size())
+                dir = g_state.prev_dirs[a.pick_prev];
         }
-        break;
-    }
-
-    case WM_APP_LOG: {
-        wchar_t* s = (wchar_t*)wp;
-        log_line(s);
-        delete[] s;
-        return 0;
-    }
-
-    case WM_APP_DONE: {
-        wchar_t* s = (wchar_t*)lp;
-        on_done(hwnd, wp != 0, s);
-        delete[] s;
-        return 0;
-    }
-
-    case WM_DROPFILES: {
-        HDROP drop = (HDROP)wp;
-        wchar_t buf[MAX_PATH];
-        if (DragQueryFileW(drop, 0, buf, MAX_PATH)) {
-            std::wstring path = buf;
-            if (fk::path_extension(path) == L".exe") {
-                SetWindowTextW(g_exe_edit, path.c_str());
-            } else if (fk::dir_exists(path)) {
-                // Convenience: pick the first exe found in a dropped folder.
+        if (!dir.empty()) {
+            fk::InstallRecord rec;
+            std::wstring exe;
+            if (fk::record_load(dir, rec) && fk::file_exists(rec.game_exe))
+                exe = rec.game_exe;
+            if (exe.empty()) {
                 WIN32_FIND_DATAW fd;
-                HANDLE h = FindFirstFileW((path + L"\\*.exe").c_str(), &fd);
+                HANDLE h = FindFirstFileW((dir + L"\\*.exe").c_str(), &fd);
                 if (h != INVALID_HANDLE_VALUE) {
-                    SetWindowTextW(g_exe_edit, fk::path_combine(path, fd.cFileName).c_str());
+                    exe = fk::path_combine(dir, fd.cFileName);
                     FindClose(h);
-                } else {
-                    MessageBoxW(hwnd, L"No .exe found in the dropped folder.", kWindowTitle, MB_ICONINFORMATION);
                 }
-            } else {
-                MessageBoxW(hwnd, L"Drop a game .exe (or its folder).", kWindowTitle, MB_ICONINFORMATION);
             }
-            update_bitness_label();
-            update_buttons();
+            if (!exe.empty())
+                set_exe_path(exe);
         }
-        DragFinish(drop);
-        return 0;
     }
 
-    case WM_DPICHANGED: {
-        // Keep it simple: recreate fonts, let the user resize/restart for full rescale.
-        g_dpi = HIWORD(wp);
-        return 0;
+    bool busy = false;
+    {
+        std::lock_guard<std::mutex> lk(g_state.mtx);
+        busy = g_state.busy;
     }
 
-    case WM_GETMINMAXINFO: {
-        auto* mmi = (MINMAXINFO*)lp;
-        mmi->ptMinTrackSize = {S(760), S(700)};
-        return 0;
-    }
-
-    case WM_DESTROY:
-        if (auto* stored = (std::vector<std::wstring>*)GetPropW(g_prev, L"dirs")) {
-            RemovePropW(g_prev, L"dirs");
-            delete stored;
+    if (a.install && !busy) {
+        fk::InstallOptions opts;
+        {
+            std::lock_guard<std::mutex> lk(g_state.mtx);
+            opts.game_exe = g_state.exe_path;
+            opts.install_lumenite = g_state.lumenite;
+            opts.install_vulkan_layer = g_state.vulkan;
         }
-        PostQuitMessage(0);
-        return 0;
+        if (fk::file_exists(opts.game_exe))
+            start_job(false, opts);
     }
-    return DefWindowProcW(hwnd, msg, wp, lp);
+    if (a.uninstall && !busy) {
+        std::wstring exe;
+        {
+            std::lock_guard<std::mutex> lk(g_state.mtx);
+            exe = g_state.exe_path;
+        }
+        std::wstring dir = fk::path_parent(exe);
+        if (fk::record_exists(dir) &&
+            MessageBoxW(hwnd,
+                        L"Remove the FeedKit / DLSS5-Feeder files from this game folder?\n\n"
+                        L"Files FeedKit replaced will be restored from their backups.",
+                        kWindowTitle, MB_YESNO | MB_ICONQUESTION) == IDYES)
+            start_job(true, fk::InstallOptions{exe});
+    }
 }
 
 } // namespace
 
 int APIENTRY wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nCmdShow) {
-    INITCOMMONCONTROLSEX icc{sizeof(icc), ICC_STANDARD_CLASSES | ICC_PROGRESS_CLASS};
-    InitCommonControlsEx(&icc);
-
     WNDCLASSEXW wc{};
     wc.cbSize = sizeof(wc);
     wc.lpfnWndProc = wnd_proc;
@@ -427,29 +365,88 @@ int APIENTRY wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nCmdShow) {
     wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
     wc.hIcon = LoadIconW(nullptr, IDI_APPLICATION);
     wc.hIconSm = wc.hIcon;
-    wc.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1);
+    wc.hbrBackground = (HBRUSH)GetStockObject(BLACK_BRUSH);
     wc.lpszClassName = kWindowClass;
+    wc.style = CS_HREDRAW | CS_VREDRAW;
     RegisterClassExW(&wc);
 
-    // Client area: 736 x 644 at design DPI.
-    RECT rc{0, 0, S(736), S(644)};
-    AdjustWindowRect(&rc, (WS_OVERLAPPEDWINDOW & ~(WS_THICKFRAME | WS_MAXIMIZEBOX)), FALSE);
-
-    HWND hwnd = CreateWindowExW(0, kWindowClass, kWindowTitle,
-                                WS_OVERLAPPEDWINDOW & ~(WS_THICKFRAME | WS_MAXIMIZEBOX),
+    // Design size 900x720 at 96 DPI, scaled for the monitor's DPI.
+    UINT dpi = GetDpiForSystem();
+    float ds = dpi / 96.0f;
+    RECT rc{0, 0, LONG(900 * ds), LONG(720 * ds)};
+    AdjustWindowRect(&rc, WS_OVERLAPPEDWINDOW, FALSE);
+    HWND hwnd = CreateWindowExW(0, kWindowClass, kWindowTitle, WS_OVERLAPPEDWINDOW,
                                 CW_USEDEFAULT, CW_USEDEFAULT, rc.right - rc.left, rc.bottom - rc.top,
                                 nullptr, nullptr, hInst, nullptr);
     if (!hwnd) return 1;
+    enable_dark_titlebar(hwnd);
+    DragAcceptFiles(hwnd, TRUE);
+
+    if (!create_device_d3d(hwnd)) {
+        MessageBoxW(hwnd, L"Direct3D 11 initialization failed.", kWindowTitle, MB_ICONERROR);
+        return 1;
+    }
 
     ShowWindow(hwnd, nCmdShow);
     UpdateWindow(hwnd);
 
-    MSG msg;
-    while (GetMessageW(&msg, nullptr, 0, 0)) {
-        if (!IsDialogMessageW(hwnd, &msg)) {
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    ImGuiIO& io = ImGui::GetIO();
+    io.IniFilename = nullptr; // don't litter the exe dir with imgui.ini
+
+    ImGui_ImplWin32_Init(hwnd);
+    ImGui_ImplDX11_Init(g_device, g_context);
+
+    ui::load_fonts(dpi / 96.0f);
+    ui::apply_theme();
+
+    {
+        std::lock_guard<std::mutex> lk(g_state.mtx);
+        g_state.log.push_back({to_utf8(L"00:00:00"),
+                               to_utf8(L"FeedKit v1.1 - pick a game .exe (or drop it here), then Install. "
+                                       L"Everything is fetched fresh from upstream on each install."),
+                               IM_COL32(139, 148, 158, 255)});
+    }
+    refresh_prev_installs();
+
+    bool running = true;
+    while (running) {
+        MSG msg;
+        while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
+            if (msg.message == WM_QUIT)
+                running = false;
             TranslateMessage(&msg);
             DispatchMessageW(&msg);
         }
+        if (!running)
+            break;
+
+        refresh_selection();
+
+        // Render frame
+        ImGui_ImplDX11_NewFrame();
+        ImGui_ImplWin32_NewFrame();
+        ImGui::NewFrame();
+
+        ui::AppActions actions;
+        {
+            std::lock_guard<std::mutex> lk(g_state.mtx);
+            ui::draw_ui(g_state, actions);
+        }
+        consume_actions(hwnd, actions);
+
+        ImGui::Render();
+        const float clear[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+        g_context->OMSetRenderTargets(1, &g_rtv, nullptr);
+        g_context->ClearRenderTargetView(g_rtv, clear);
+        ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
+        g_swapchain->Present(1, 0); // vsync
     }
-    return (int)msg.wParam;
+
+    ImGui_ImplDX11_Shutdown();
+    ImGui_ImplWin32_Shutdown();
+    ImGui::DestroyContext();
+    cleanup_device_d3d();
+    return 0;
 }

@@ -52,16 +52,16 @@
       <ConformanceMode>true</ConformanceMode>
       <PreprocessorDefinitions>WIN32_LEAN_AND_MEAN;NOMINMAX;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
-      <AdditionalIncludeDirectories>$(ProjectDir)..\external\miniz;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)..\external\miniz;$(ProjectDir)..\external\imgui;$(ProjectDir)..\external\imgui\backends;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalDependencies>comctl32.lib;winhttp.lib;shlwapi.lib;shell32.lib;ole32.lib;user32.lib;gdi32.lib;advapi32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <!-- Manifest comes from the .rc (RT_MANIFEST); linker's own copy would collide (CVT1100). -->
+      <GenerateManifest>false</GenerateManifest>
+      <AdditionalOptions>/MANIFEST:NO %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalDependencies>d3d11.lib;dxgi.lib;d3dcompiler.lib;winhttp.lib;shlwapi.lib;shell32.lib;ole32.lib;dwmapi.lib;user32.lib;gdi32.lib;advapi32.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
-    <Manifest>
-      <AdditionalManifestFiles>$(ProjectDir)app.manifest</AdditionalManifestFiles>
-    </Manifest>
   </ItemDefinitionGroup>
 
   <ItemDefinitionGroup Condition="'$(Configuration)'=='Debug'">
@@ -88,6 +88,7 @@
 
   <ItemGroup>
     <ClCompile Include="main.cpp"/>
+    <ClCompile Include="gui.cpp"/>
     <ClCompile Include="util.cpp"/>
     <ClCompile Include="json_lite.cpp"/>
     <ClCompile Include="http.cpp"/>
@@ -95,11 +96,30 @@
     <ClCompile Include="record.cpp"/>
     <ClCompile Include="sources.cpp"/>
     <ClCompile Include="install.cpp"/>
+    <ClCompile Include="..\external\imgui\imgui.cpp">
+      <WarningLevel>TurnOffAllWarnings</WarningLevel>
+    </ClCompile>
+    <ClCompile Include="..\external\imgui\imgui_draw.cpp">
+      <WarningLevel>TurnOffAllWarnings</WarningLevel>
+    </ClCompile>
+    <ClCompile Include="..\external\imgui\imgui_tables.cpp">
+      <WarningLevel>TurnOffAllWarnings</WarningLevel>
+    </ClCompile>
+    <ClCompile Include="..\external\imgui\imgui_widgets.cpp">
+      <WarningLevel>TurnOffAllWarnings</WarningLevel>
+    </ClCompile>
+    <ClCompile Include="..\external\imgui\backends\imgui_impl_win32.cpp">
+      <WarningLevel>TurnOffAllWarnings</WarningLevel>
+    </ClCompile>
+    <ClCompile Include="..\external\imgui\backends\imgui_impl_dx11.cpp">
+      <WarningLevel>TurnOffAllWarnings</WarningLevel>
+    </ClCompile>
     <ClCompile Include="..\external\miniz\miniz.c">
       <WarningLevel>TurnOffAllWarnings</WarningLevel>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="gui.h"/>
     <ClInclude Include="util.h"/>
     <ClInclude Include="json_lite.h"/>
     <ClInclude Include="http.h"/>

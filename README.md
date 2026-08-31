@@ -4,7 +4,9 @@
 
 FeedKit brings DLSS 5 neural rendering (DLAA) to games that ship without any DLSS - without the usual manual file shuffle. Pick a game executable, click **Install**, and FeedKit downloads the current files from their official sources and puts everything where it belongs. Click **Uninstall** and it's all gone, with any replaced files restored from backup.
 
-> Native Windows app (Win32 C++). No runtime dependencies - just download `FeedKit.exe` and run it.
+> Native Windows app (Win32 C++ + Dear ImGui). No runtime dependencies - just download `FeedKit.exe` and run it.
+
+![FeedKit](docs/screenshot.png)
 
 ---
 
@@ -100,7 +102,7 @@ Point FeedKit at the same game `.exe` and click **Uninstall**. It removes exactl
 ## Building from source
 
 1. Open `FeedKit.sln` in Visual Studio 2022 (Desktop C++ workload).
-2. Build - that's it. No NuGet, no vcpkg, no external dependencies (miniz is vendored, CRT is statically linked).
+2. Build - that's it. No NuGet, no vcpkg, no external dependencies (Dear ImGui and miniz are vendored under `external/`, CRT is statically linked).
 
 Or from the command line:
 
