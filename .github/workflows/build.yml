@@ -1,0 +1,26 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build (Release x64)
+        run: msbuild FeedKit.sln /p:Configuration=Release /p:Platform=x64 /m /nologo /v:m
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: FeedKit-win-x64
+          path: build/Release/FeedKit.exe
+          if-no-files-found: error

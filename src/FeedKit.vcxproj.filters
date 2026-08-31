@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="Source Files">{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</Filter>
+    <Filter Include="Header Files">{93995380-89BD-4b04-88EB-625FBE52EBFB}</Filter>
+    <Filter Include="Resource Files">{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</Filter>
+    <Filter Include="external">{1D4C0E5A-6F2B-4E39-9C81-2A7B3D5E6F10}</Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="main.cpp"><Filter>Source Files</Filter></ClCompile>
+    <ClCompile Include="util.cpp"><Filter>Source Files</Filter></ClCompile>
+    <ClCompile Include="json_lite.cpp"><Filter>Source Files</Filter></ClCompile>
+    <ClCompile Include="http.cpp"><Filter>Source Files</Filter></ClCompile>
+    <ClCompile Include="pe_bitness.cpp"><Filter>Source Files</Filter></ClCompile>
+    <ClCompile Include="record.cpp"><Filter>Source Files</Filter></ClCompile>
+    <ClCompile Include="sources.cpp"><Filter>Source Files</Filter></ClCompile>
+    <ClCompile Include="install.cpp"><Filter>Source Files</Filter></ClCompile>
+    <ClCompile Include="..\external\miniz\miniz.c"><Filter>external</Filter></ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="util.h"><Filter>Header Files</Filter></ClInclude>
+    <ClInclude Include="json_lite.h"><Filter>Header Files</Filter></ClInclude>
+    <ClInclude Include="http.h"><Filter>Header Files</Filter></ClInclude>
+    <ClInclude Include="pe_bitness.h"><Filter>Header Files</Filter></ClInclude>
+    <ClInclude Include="record.h"><Filter>Header Files</Filter></ClInclude>
+    <ClInclude Include="sources.h"><Filter>Header Files</Filter></ClInclude>
+    <ClInclude Include="install.h"><Filter>Header Files</Filter></ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="FeedKit.rc"><Filter>Resource Files</Filter></ResourceCompile>
+    <None Include="app.manifest"><Filter>Resource Files</Filter></None>
+  </ItemGroup>
+</Project>

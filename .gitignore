@@ -1,0 +1,21 @@
+# Visual Studio / MSBuild
+.vs/
+build/
+x64/
+Debug/
+Release/
+*.user
+*.suo
+*.ncb
+*.sdf
+*.opensdf
+*.VC.db
+*.VC.opendb
+*.pdb
+*.ilk
+*.obj
+*.log
+
+# OS
+Thumbs.db
+desktop.ini
