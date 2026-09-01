@@ -107,6 +107,7 @@ Point FeedKit at the same game `.exe` and click **Uninstall**. It removes exactl
 - **`ReShade.log`** covers ReShade/add-on loading.
 - **"The game executable is locked"** - the game is still running. Close it first.
 - **Install into `C:\Program Files\...` fails** - run FeedKit as administrator so it can write into the game folder.
+- **Antivirus flags FeedKit.exe** - expected for game-modding tools and based on behavior/reputation heuristics, not a real threat. FeedKit is fully open source and built publicly on CI. See [docs/ANTIVIRUS.md](docs/ANTIVIRUS.md) for the full explanation, vendor submission status and how to restore the file.
 - **D3D9 games**: if you don't see the dgVoodoo watermark in-game, the translation isn't active - the dgVoodooVRAM default (256 MB) can cause "ran out of video memory" errors on some engines; FeedKit sets it to 1 GB automatically.
 - FeedKit is single-player only territory: ReShade add-on support can trip anti-cheat in online games. Don't use it there.
 
