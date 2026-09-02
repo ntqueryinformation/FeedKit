@@ -4,6 +4,7 @@
 
 #include "imgui.h"
 #include "util.h"
+#include "version.h"
 
 #include <windows.h>
 
@@ -302,11 +303,54 @@ void draw_ui(AppState& s, AppActions& out) {
     ImGui::PopFont();
     ImGui::SameLine();
     ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 6 * sc);
+    std::string version_label = "v" + to_utf8(fk::kAppVersion);
     ImGui::PushStyleColor(ImGuiCol_Text, C_FAINT);
     ImGui::PushFont(F_REG(), 12.5f * sc);
-    ImGui::TextUnformatted("v1.3.2");
+    ImGui::TextUnformatted(version_label.c_str());
     ImGui::PopFont();
     ImGui::PopStyleColor();
+
+    // Update widget right after the version label.
+    ImGui::SameLine();
+    ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 4 * sc);
+    if (s.update_state == 2 && !s.updating) {
+        std::string label = "Update to v" + to_utf8(s.update_version);
+        ImGui::PushStyleColor(ImGuiCol_Button, C_ACCENT);
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, C_ACCENT_HI);
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, C_ACCENT);
+        ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(255, 255, 255, 255));
+        ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 6 * sc);
+        ImGui::PushFont(F_BOLD(), 12.5f * sc);
+        if (ImGui::SmallButton(label.c_str()))
+            out.update_now = true;
+        ImGui::PopFont();
+        ImGui::PopStyleVar();
+        ImGui::PopStyleColor(4);
+    } else if (s.update_state == 4 || s.updating) {
+        ImGui::PushStyleColor(ImGuiCol_Text, C_AMBER);
+        ImGui::PushFont(F_REG(), 12.5f * sc);
+        ImGui::TextUnformatted("updating FeedKit...");
+        ImGui::PopFont();
+        ImGui::PopStyleColor();
+    } else if (s.update_state == 0) {
+        ImGui::PushStyleColor(ImGuiCol_Text, C_FAINT);
+        ImGui::PushFont(F_REG(), 12.5f * sc);
+        ImGui::TextUnformatted("checking for updates...");
+        ImGui::PopFont();
+        ImGui::PopStyleColor();
+    } else if (s.update_state == 1) {
+        ImGui::PushStyleColor(ImGuiCol_Text, C_FAINT);
+        ImGui::PushFont(F_REG(), 12.5f * sc);
+        ImGui::TextUnformatted("up to date");
+        ImGui::PopFont();
+        ImGui::PopStyleColor();
+    } else if (s.update_state == 3) {
+        ImGui::PushStyleColor(ImGuiCol_Text, C_FAINT);
+        ImGui::PushFont(F_REG(), 12.5f * sc);
+        ImGui::TextUnformatted("update check failed");
+        ImGui::PopFont();
+        ImGui::PopStyleColor();
+    }
 
     // Repo link, right-aligned in the header row.
     {

@@ -8,6 +8,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="main.cpp"><Filter>Source Files</Filter></ClCompile>
+    <ClCompile Include="updater.cpp"><Filter>Source Files</Filter></ClCompile>
     <ClCompile Include="gui.cpp"><Filter>Source Files</Filter></ClCompile>
     <ClCompile Include="util.cpp"><Filter>Source Files</Filter></ClCompile>
     <ClCompile Include="ini_text.cpp"><Filter>Source Files</Filter></ClCompile>
@@ -27,6 +28,8 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="gui.h"><Filter>Header Files</Filter></ClInclude>
+    <ClInclude Include="updater.h"><Filter>Header Files</Filter></ClInclude>
+    <ClInclude Include="version.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="util.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="ini_text.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="json_lite.h"><Filter>Header Files</Filter></ClInclude>

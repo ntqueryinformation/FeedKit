@@ -88,6 +88,7 @@
 
   <ItemGroup>
     <ClCompile Include="main.cpp"/>
+    <ClCompile Include="updater.cpp"/>
     <ClCompile Include="gui.cpp"/>
     <ClCompile Include="util.cpp"/>
     <ClCompile Include="ini_text.cpp"/>
@@ -121,6 +122,8 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="gui.h"/>
+    <ClInclude Include="updater.h"/>
+    <ClInclude Include="version.h"/>
     <ClInclude Include="util.h"/>
     <ClInclude Include="ini_text.h"/>
     <ClInclude Include="json_lite.h"/>

@@ -32,6 +32,11 @@ struct AppState {
     bool d3d9 = false;
     bool opengl = false;
 
+    // Built-in updater (states mirror fk::UpdateState).
+    int update_state = 0;           // 0 checking, 1 up-to-date, 2 available, 3 failed, 4 downloading
+    std::wstring update_version;    // remote version when available / error text
+    bool updating = false;
+
     bool busy = false;
     std::vector<LogLine> log;
     bool log_auto_scroll = true;
@@ -52,6 +57,7 @@ struct AppActions {
     bool open_folder = false;
     bool open_downloads = false;
     bool clear_log = false;
+    bool update_now = false;
     int pick_prev = -1;
     std::wstring open_url;
 };

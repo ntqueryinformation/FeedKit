@@ -10,6 +10,10 @@ FeedKit brings DLSS 5 neural rendering (DLAA) to games that ship without any DLS
 
 ---
 
+## Built-in updater
+
+FeedKit checks GitHub for a newer release when it starts. When one exists, an **"Update to vX.Y.Z"** button appears next to the version label - one click downloads the new build, verifies it against the SHA-256 published in the release notes, swaps it in place of the running exe, and offers to restart. Uninstalling the update is as simple as restoring the `FeedKit.exe.old` file the swap leaves behind (deleted automatically on the next start).
+
 ## Requirements
 
 - Windows 10 / 11 (x64)

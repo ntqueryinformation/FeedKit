@@ -13,6 +13,7 @@
 #include "backends/imgui_impl_win32.h"
 #include "backends/imgui_impl_dx11.h"
 
+#include <atomic>
 #include <thread>
 
 #include "gui.h"
@@ -20,6 +21,8 @@
 #include "pe_bitness.h"
 #include "record.h"
 #include "sources.h"
+#include "updater.h"
+#include "version.h"
 #include "util.h"
 
 #pragma comment(lib, "d3d11.lib")
@@ -156,6 +159,52 @@ void start_job(bool uninstall, const fk::InstallOptions& opts) {
     }
     log_line(uninstall ? L"---- Starting uninstall ----" : L"---- Starting install ----");
     std::thread(run_job, job).detach();
+}
+
+// --- Built-in updater ---
+
+std::atomic<bool> g_exit_requested{false};
+bool g_selfupdate_test = false;
+
+void run_self_update() {
+    fk::perform_update(
+        g_selfupdate_test ? std::wstring(L"0.0.1") : std::wstring(fk::kAppVersion),
+        [](const std::wstring& line) { log_line(line); },
+        [](bool ok, const std::wstring& msg, bool restart_requested) {
+            {
+                std::lock_guard<std::mutex> lk(g_state.mtx);
+                g_state.updating = false;
+            }
+            if (!ok) {
+                log_line(L"Update failed: " + msg);
+                return;
+            }
+            if (!restart_requested) {
+                log_line(L"Already running the latest version.");
+                return;
+            }
+            // Ask (except in selftest mode) and relaunch the freshly swapped exe.
+            bool restart_now = g_selfupdate_test ||
+                MessageBoxW(nullptr, L"FeedKit has been updated.\n\nRestart now to start using the new version?",
+                            L"FeedKit", MB_YESNO | MB_ICONQUESTION) == IDYES;
+            if (restart_now) {
+                wchar_t exe[MAX_PATH] = {};
+                GetModuleFileNameW(nullptr, exe, MAX_PATH);
+                STARTUPINFOW si{};
+                si.cb = sizeof(si);
+                PROCESS_INFORMATION pi{};
+                if (CreateProcessW(exe, nullptr, nullptr, nullptr, FALSE, 0, nullptr, nullptr, &si, &pi)) {
+                    CloseHandle(pi.hThread);
+                    CloseHandle(pi.hProcess);
+                    g_exit_requested.store(true);
+                } else {
+                    log_line(L"Update installed - it will apply on the next start.");
+                }
+            } else {
+                log_line(L"Update installed - it will apply on the next start.");
+            }
+        },
+        [](const std::wstring&) { return true; });
 }
 
 // --- State helpers (UI thread) ---
@@ -355,11 +404,33 @@ void consume_actions(HWND hwnd, const ui::AppActions& a) {
                         kWindowTitle, MB_YESNO | MB_ICONQUESTION) == IDYES)
             start_job(true, fk::InstallOptions{exe});
     }
+
+    bool updating = false;
+    {
+        std::lock_guard<std::mutex> lk(g_state.mtx);
+        updating = g_state.updating;
+    }
+    if (a.update_now && !updating) {
+        std::lock_guard<std::mutex> lk(g_state.mtx);
+        g_state.updating = true;
+        std::thread(run_self_update).detach();
+    }
 }
 
 } // namespace
 
-int APIENTRY wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nCmdShow) {
+int APIENTRY wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR cmdLine, int nCmdShow) {
+    (void)cmdLine;
+    // Hidden diagnostic: --selfupdate-test forces the updater to run at startup
+    // against the latest public release (used to verify the self-swap flow).
+    int argc = 0;
+    LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
+    g_selfupdate_test = false;
+    for (int i = 1; argv && i < argc; i++)
+        if (wcscmp(argv[i], L"--selfupdate-test") == 0)
+            g_selfupdate_test = true;
+    if (argv) LocalFree(argv);
+
     WNDCLASSEXW wc{};
     wc.cbSize = sizeof(wc);
     wc.lpfnWndProc = wnd_proc;
@@ -409,17 +480,45 @@ int APIENTRY wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nCmdShow) {
     ui::load_fonts(dpi / 96.0f);
     ui::apply_theme();
 
+    // Clean up a leftover binary from a previous self-update.
+    {
+        wchar_t exe[MAX_PATH] = {};
+        GetModuleFileNameW(nullptr, exe, MAX_PATH);
+        fk::delete_file(std::wstring(exe) + L".old");
+        fk::delete_file(std::wstring(exe) + L".new");
+    }
+
     {
         std::lock_guard<std::mutex> lk(g_state.mtx);
         g_state.log.push_back({to_utf8(L"00:00:00"),
-                               to_utf8(L"FeedKit v1.3.2 - pick a game .exe (or drop it here), then Install. "
+                               to_utf8(std::wstring(L"FeedKit v") + fk::kAppVersion +
+                                       L" - pick a game .exe (or drop it here), then Install. "
                                        L"Everything is fetched fresh from upstream on each install."),
                                IM_COL32(139, 148, 158, 255)});
     }
     refresh_prev_installs();
 
+    // Check for a newer release in the background (or force the self-update
+    // flow with --selfupdate-test).
+    if (g_selfupdate_test) {
+        log_line(L"---- Self-update test: downloading the latest release ----");
+        std::thread(run_self_update).detach();
+    } else {
+        std::thread([] {
+            fk::check_latest_version(fk::kAppVersion, [](fk::UpdateState state, const std::wstring& v) {
+                {
+                    std::lock_guard<std::mutex> lk(g_state.mtx);
+                    g_state.update_state = (int)state;
+                    g_state.update_version = v;
+                    if (state == fk::UpdateState::Failed)
+                        g_state.update_version = L"";
+                }
+            });
+        }).detach();
+    }
+
     bool running = true;
-    while (running) {
+    while (running && !g_exit_requested.load()) {
         MSG msg;
         while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
             if (msg.message == WM_QUIT)
