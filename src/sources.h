@@ -12,6 +12,10 @@ namespace fk {
 using LogFn = std::function<void(const std::wstring&)>;
 using ProgressFn = std::function<void(uint64_t done, uint64_t total)>; // total 0 = unknown
 
+// Installed by the UI: shows a Yes/No question, returns true for Yes. Used to
+// offer the cached copy when an upstream download fails with 403/404.
+void set_prompt_handler(std::function<bool(const std::wstring& question)> handler);
+
 struct DownloadedFile {
     std::wstring name;        // file name (in the temp dir)
     std::wstring local_path;  // absolute path in temp

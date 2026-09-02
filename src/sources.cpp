@@ -4,6 +4,8 @@
 #include "json_lite.h"
 #include "util.h"
 
+#include <windows.h>
+
 #include <miniz.h>
 
 #include <algorithm>
@@ -23,6 +25,9 @@ std::wstring fetch_temp_dir() {
 
 namespace {
 
+// Set by the UI (set_prompt_handler). Empty by default -> no prompting.
+std::function<bool(const std::wstring&)> g_prompt;
+
 ProgressFn fanout(const LogFn& log, const char* label) {
     // Per-file progress: show percentage only (totals differ per file).
     return [log, label](uint64_t done, uint64_t total) {
@@ -33,15 +38,62 @@ ProgressFn fanout(const LogFn& log, const char* label) {
     };
 }
 
-bool download(const std::wstring& url, const std::wstring& dest, const ProgressFn& progress,
-              std::wstring* err = nullptr) {
-    return http_download_to_file(
-        url, dest,
-        [progress](const HttpProgress& p) {
+// Throw helpers so the fetch pipeline can unwind to the caller's catch.
+[[noreturn]] void fail(const std::wstring& msg) { throw std::runtime_error(to_utf8(msg)); }
+
+void check_http_body(const std::wstring& what, const HttpResponse& r) {
+    if (!r.ok) fail(what + L": " + r.error);
+}
+
+// Cache-friendly download: streams to <dest>.tmp and only replaces the cached
+// file on success, so a failed download can never destroy a previous copy. On
+// HTTP 403/404 with a cached copy present, the user is asked whether to use it.
+bool download_cached(const std::wstring& url, const std::wstring& dest, const ProgressFn& progress,
+                     const LogFn& log, std::wstring* err = nullptr) {
+    std::wstring tmp = dest + L".tmp";
+    unsigned status = 0;
+    std::wstring local_err;
+    bool ok = http_download_to_file(
+        url, tmp,
+        [&progress](const HttpProgress& p) {
             if (progress) progress(p.downloaded, p.total);
             return true;
         },
-        err);
+        &local_err, &status);
+
+    if (ok) {
+        delete_file(dest);
+        if (!MoveFileW(tmp.c_str(), dest.c_str())) {
+            if (!copy_file(tmp, dest, true))
+                fail(L"Cannot update cached file: " + dest);
+            delete_file(tmp);
+        }
+        return true;
+    }
+    delete_file(tmp);
+
+    bool is_403_404 = (status == 403 || status == 404);
+    if (!is_403_404 || !file_exists(dest))
+        fail((local_err.empty() ? fmt(L"Download failed: %s", url.c_str()) : local_err));
+
+    // Offer the cached copy.
+    log(L"Download failed (" + fmt(L"HTTP %u", status) + L"): " + url);
+    std::wstring question = L"Download of \"" + path_filename(dest) +
+        L"\" failed (HTTP " + std::to_wstring(status) + L").\n\n"
+        L"Use the previously downloaded cached copy instead?\n\n"
+        L"Yes = continue with the cached version\n"
+        L"No = cancel the installation";
+    bool use_cache = g_prompt ? g_prompt(question) : false;
+    if (!use_cache)
+        fail(local_err.empty() ? fmt(L"Download failed: %s", url.c_str()) : local_err);
+    log(L"Using cached " + path_filename(dest));
+    if (err) *err = L"used cached copy";
+    return true;
+}
+
+bool download(const std::wstring& url, const std::wstring& dest, const ProgressFn& progress,
+              std::wstring* err = nullptr) {
+    return download_cached(url, dest, progress, {}, err);
 }
 
 DownloadedFile dl_to(const std::wstring& url, const std::wstring& name, const ProgressFn& progress) {
@@ -55,13 +107,6 @@ DownloadedFile dl_to(const std::wstring& url, const std::wstring& name, const Pr
     return f;
 }
 
-// Throw helpers so the fetch pipeline can unwind to the caller's catch.
-[[noreturn]] void fail(const std::wstring& msg) { throw std::runtime_error(to_utf8(msg)); }
-
-void check_http_body(const std::wstring& what, const HttpResponse& r) {
-    if (!r.ok) fail(what + L": " + r.error);
-}
-
 // Wildcard match with a single '*' (or exact match when no '*').
 bool wc_match(const std::wstring& pattern, const std::wstring& s) {
     size_t star = pattern.find(L'*');
@@ -70,6 +115,25 @@ bool wc_match(const std::wstring& pattern, const std::wstring& s) {
     std::wstring post = lower(pattern.substr(star + 1));
     std::wstring ls = lower(s);
     return starts_with(ls, pre) && ends_with(ls, post) && ls.size() >= pre.size() + post.size();
+}
+
+// Repackage extracted files into a zip (entry names as given).
+void zip_create_from_files(const std::wstring& zip_path,
+                           const std::vector<std::pair<std::wstring, std::wstring>>& entries) {
+    mz_zip_archive zip{};
+    if (!mz_zip_writer_init_file(&zip, to_utf8(zip_path).c_str(), 0))
+        fail(L"Cannot create zip: " + zip_path);
+    for (const auto& np : entries) {
+        std::string name = to_utf8(np.first);
+        std::replace(name.begin(), name.end(), '\\', '/');
+        if (!mz_zip_writer_add_file(&zip, name.c_str(), to_utf8(np.second).c_str(), nullptr, 0,
+                                    (mz_uint)MZ_DEFAULT_COMPRESSION)) {
+            mz_zip_writer_end(&zip);
+            fail(L"Cannot add " + np.second + L" to " + zip_path);
+        }
+    }
+    mz_zip_writer_finalize_archive(&zip);
+    mz_zip_writer_end(&zip);
 }
 
 } // namespace
@@ -117,30 +181,96 @@ std::vector<std::wstring> zip_extract_matching(const std::wstring& zip_path,
     return extracted;
 }
 
+void set_prompt_handler(std::function<bool(const std::wstring&)> handler) {
+    g_prompt = std::move(handler);
+}
+
+// Stage one payload from a Feeder release zip into the temp dir under its flat
+// name. Suffix patterns tolerate version-folder nesting inside the zip.
+DownloadedFile stage_feeder(const std::wstring& zip, const std::wstring& pattern,
+                            const std::wstring& flat) {
+    auto files = zip_extract_matching(zip, fetch_temp_dir(), {pattern});
+    DownloadedFile f;
+    f.name = flat;
+    f.local_path = path_combine(fetch_temp_dir(), flat);
+    if (f.local_path != files.front())
+        copy_file(files.front(), f.local_path, true);
+    f.size = file_size(f.local_path);
+    return f;
+}
+
 FeederBundle fetch_feeder(const LogFn& log, const ProgressFn& progress) {
     FeederBundle out;
-    const std::wstring base = L"https://github.com/jlrouzies-fr/DLSS5-Feeder/releases/latest/download";
+    log(L"Fetching DLSS5-Feeder from github.com/jlrouzies-fr/DLSS5-Feeder...");
 
-    // Resolve the tag for display (best effort - downloads themselves use the
-    // stable /latest/ URL).
+    // Since v0.12.0 upstream ships a single zip asset instead of loose files.
+    std::wstring zip_name, zip_url;
     HttpResponse r = http_get(L"https://api.github.com/repos/jlrouzies-fr/DLSS5-Feeder/releases/latest");
     if (r.ok) {
         Json j;
-        if (Json::parse(r.body, j)) out.release_tag = j.get_str(L"tag_name");
+        if (Json::parse(r.body, j)) {
+            out.release_tag = j.get_str(L"tag_name");
+            const Json* assets = j.find(L"assets");
+            if (assets && assets->is(Json::Type::Array)) {
+                for (const auto& a : assets->items) {
+                    std::wstring name = a.get_str(L"name");
+                    std::wstring url = a.get_str(L"browser_download_url");
+                    if (ends_with(lower(name), L".zip") && !url.empty()) {
+                        zip_name = name;
+                        zip_url = url;
+                        break;
+                    }
+                }
+            }
+        }
     }
-    log(L"DLSS5-Feeder latest release: " + (out.release_tag.empty() ? L"<unknown>" : out.release_tag));
 
-    out.addon64 = dl_to(base + L"/dlss5-feed.addon64", L"dlss5-feed.addon64", progress);
-    out.addon32 = dl_to(base + L"/dlss5-feed.addon32", L"dlss5-feed.addon32", progress);
-    out.fx_shader = dl_to(base + L"/DLSS5_Feed.fx", L"DLSS5_Feed.fx", progress);
-    out.host64_exe = dl_to(base + L"/dlss5-feed-host64.exe", L"dlss5-feed-host64.exe", progress);
+    if (!zip_url.empty()) {
+        log(L"DLSS5-Feeder latest release: " +
+            (out.release_tag.empty() ? zip_name : out.release_tag));
+        std::wstring zip = path_combine(fetch_temp_dir(), zip_name);
+        download(zip_url, zip, progress);
 
-    // Optional component: absent from some releases.
-    std::wstring vk = path_combine(fetch_temp_dir(), L"feed-vk-layer.zip");
-    if (download(base + L"/feed-vk-layer.zip", vk, progress)) {
-        out.vk_layer_zip = DownloadedFile{L"feed-vk-layer.zip", vk, file_size(vk)};
+        out.addon64 = stage_feeder(zip, L"*dlss5-feed.addon64", L"dlss5-feed.addon64");
+        out.addon32 = stage_feeder(zip, L"*dlss5-feed.addon32", L"dlss5-feed.addon32");
+        out.fx_shader = stage_feeder(zip, L"*DLSS5_Feed.fx", L"DLSS5_Feed.fx");
+        out.host64_exe = stage_feeder(zip, L"*dlss5-feed-host64.exe", L"dlss5-feed-host64.exe");
+
+        // Vulkan layer: optional. The release zip carries loose layer-x64/x86
+        // files - repackage them into feed-vk-layer.zip for the installer.
+        try {
+            auto layer_files = zip_extract_matching(
+                zip, fetch_temp_dir(),
+                {L"*VkLayer_feed_vk.dll", L"*VkLayer_feed_vk32.dll", L"*VkLayer_feed_vk.json",
+                 L"*VkLayer_feed_vk32.json", L"*run-with-feed-layer*.bat"});
+            if (!layer_files.empty()) {
+                std::vector<std::pair<std::wstring, std::wstring>> entries;
+                for (const auto& f : layer_files)
+                    entries.emplace_back(path_filename(f), f);
+                std::wstring vkzip = path_combine(fetch_temp_dir(), L"feed-vk-layer.zip");
+                zip_create_from_files(vkzip, entries);
+                out.vk_layer_zip = DownloadedFile{L"feed-vk-layer.zip", vkzip, file_size(vkzip)};
+            } else {
+                log(L"  feed-vk-layer not published in this release, Vulkan layer unavailable");
+            }
+        } catch (const std::exception&) {
+            log(L"  feed-vk-layer not published in this release, Vulkan layer unavailable");
+        }
     } else {
-        log(L"  feed-vk-layer.zip not published in this release, Vulkan layer unavailable");
+        // Fallback: legacy releases shipped loose per-file assets.
+        log(L"Release lookup failed - trying legacy loose-file URLs...");
+        const std::wstring base = L"https://github.com/jlrouzies-fr/DLSS5-Feeder/releases/latest/download";
+        out.addon64 = dl_to(base + L"/dlss5-feed.addon64", L"dlss5-feed.addon64", progress);
+        out.addon32 = dl_to(base + L"/dlss5-feed.addon32", L"dlss5-feed.addon32", progress);
+        out.fx_shader = dl_to(base + L"/DLSS5_Feed.fx", L"DLSS5_Feed.fx", progress);
+        out.host64_exe = dl_to(base + L"/dlss5-feed-host64.exe", L"dlss5-feed-host64.exe", progress);
+
+        std::wstring vk = path_combine(fetch_temp_dir(), L"feed-vk-layer.zip");
+        if (download(base + L"/feed-vk-layer.zip", vk, progress)) {
+            out.vk_layer_zip = DownloadedFile{L"feed-vk-layer.zip", vk, file_size(vk)};
+        } else {
+            log(L"  feed-vk-layer.zip not published in this release, Vulkan layer unavailable");
+        }
     }
 
     out.ok = true;

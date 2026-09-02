@@ -133,7 +133,8 @@ HttpResponse http_get(const std::wstring& url, const HttpCallback& cb) {
 }
 
 bool http_download_to_file(const std::wstring& url, const std::wstring& dest_path,
-                           const HttpCallback& cb, std::wstring* error) {
+                           const HttpCallback& cb, std::wstring* error, unsigned* status_out) {
+    if (status_out) *status_out = 0;
     std::ofstream out(dest_path, std::ios::binary | std::ios::trunc);
     if (!out) {
         if (error) *error = L"Cannot create file: " + dest_path;
@@ -147,6 +148,7 @@ bool http_download_to_file(const std::wstring& url, const std::wstring& dest_pat
     };
     unsigned status = 0;
     bool ok = run_request(url, cb, sink, &status, error);
+    if (status_out) *status_out = status;
     out.close();
     if (!file_ok) {
         if (error) *error = L"Disk write failed: " + dest_path;

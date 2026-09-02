@@ -26,8 +26,10 @@ using HttpCallback = std::function<bool(const HttpProgress&)>;
 
 HttpResponse http_get(const std::wstring& url, const HttpCallback& cb = nullptr);
 
-// Streams to disk. Returns true on HTTP 200 and full write.
+// Streams to disk. Returns true on HTTP 200 and full write. When status_out is
+// provided it receives the HTTP status code (0 if the request never completed).
 bool http_download_to_file(const std::wstring& url, const std::wstring& dest_path,
-                           const HttpCallback& cb = nullptr, std::wstring* error = nullptr);
+                           const HttpCallback& cb = nullptr, std::wstring* error = nullptr,
+                           unsigned* status_out = nullptr);
 
 } // namespace fk
